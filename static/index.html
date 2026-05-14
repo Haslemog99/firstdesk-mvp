@@ -941,6 +941,7 @@ button{cursor:pointer}
 <div class="field" id="nameField" style="display:none"><label>Name</label><input type="text" id="iName" placeholder="Alex Morgan" autocomplete="name"></div>
 <div class="field"><label>Email</label><input type="email" id="iEmail" placeholder="you@email.com" autocomplete="email" required></div>
 <div class="field"><label>Password</label><input type="password" id="iPwd" placeholder="At least 8 characters" autocomplete="current-password" required></div>
+<div class="field" id="pwd2Field" style="display:none"><label>Confirm password</label><input type="password" id="iPwd2" placeholder="Re-enter password" autocomplete="new-password"></div>
 <div class="field" id="consentField" style="display:none;margin-top:4px"><label style="display:flex;align-items:flex-start;gap:8px;cursor:pointer;font-weight:400;font-size:12px;line-height:1.5;color:#a1a1aa"><input type="checkbox" id="iConsent" style="margin-top:3px;flex:0 0 auto;width:14px;height:14px;cursor:pointer"><span style="flex:1 1 auto;min-width:0">I agree to the <a href="#" onclick="event.preventDefault();alert('FirstDesk Privacy Policy\\n\\n• We store your email, name, and simulation progress so you can resume training.\\n• Passwords are hashed; we never see or store your plaintext password.\\n• Your data is not shared with third parties.\\n• You can delete your account and all data at any time from the dashboard.')" style="color:#a78bfa;text-decoration:underline">Privacy Policy</a></span></label></div>
 <button type="submit" class="auth-btn" id="authBtn">Sign in</button>
 <div class="auth-err" id="authErr"></div>
@@ -1192,7 +1193,7 @@ function showDesktop(){document.body.classList.add('desk-mode');document.getElem
 function _syncGuestBanner(){const b=document.getElementById('guestBanner');if(!b)return;const isGuest=!!(currentUser&&currentUser.is_guest);const onDesktop=document.body.classList.contains('desk-mode');b.classList.toggle('on',isGuest&&onDesktop)}
 let authMode='signin';
 function _errMsg(d){if(!d)return'';const x=d.detail!==undefined?d.detail:(d.message||d.error);if(!x)return'';if(typeof x==='string')return x;if(Array.isArray(x))return x.map(v=>(v&&(v.msg||v.message))||'').filter(Boolean).join('; ')||'';if(typeof x==='object')return x.message||x.error||x.msg||(d.message||d.error||'');return String(x)}
-function setAuthMode(m){authMode=m;document.getElementById('tabSignin').classList.toggle('on',m==='signin');document.getElementById('tabSignup').classList.toggle('on',m==='signup');document.getElementById('nameField').style.display=m==='signup'?'block':'none';const cf=document.getElementById('consentField');if(cf)cf.style.display=m==='signup'?'block':'none';document.getElementById('authTitle').textContent=m==='signup'?'Create your desk':'Welcome back';document.getElementById('authSub').textContent=m==='signup'?'Start your training. We save your progress.':'Sign in to continue your training.';document.getElementById('authBtn').textContent=m==='signup'?'Create account':'Sign in';document.getElementById('authErr').textContent='';document.getElementById('iPwd').setAttribute('autocomplete',m==='signup'?'new-password':'current-password')}
+function setAuthMode(m){authMode=m;document.getElementById('tabSignin').classList.toggle('on',m==='signin');document.getElementById('tabSignup').classList.toggle('on',m==='signup');document.getElementById('nameField').style.display=m==='signup'?'block':'none';const pf2=document.getElementById('pwd2Field');if(pf2)pf2.style.display=m==='signup'?'block':'none';const cf=document.getElementById('consentField');if(cf)cf.style.display=m==='signup'?'block':'none';document.getElementById('authTitle').textContent=m==='signup'?'Create your desk':'Welcome back';document.getElementById('authSub').textContent=m==='signup'?'Start your training. We save your progress.':'Sign in to continue your training.';document.getElementById('authBtn').textContent=m==='signup'?'Create account':'Sign in';document.getElementById('authErr').textContent='';document.getElementById('iPwd').setAttribute('autocomplete',m==='signup'?'new-password':'current-password');const p2=document.getElementById('iPwd2');if(p2)p2.value=''}
 async function submitAuth(e){
   e.preventDefault();
   const email=document.getElementById('iEmail').value.trim();
@@ -1201,7 +1202,12 @@ async function submitAuth(e){
   const consent=(document.getElementById('iConsent')||{}).checked;
   const btn=document.getElementById('authBtn'),err=document.getElementById('authErr');
   err.textContent='';
-  if(authMode==='signup'&&!consent){err.textContent='Please agree to the Privacy Policy to create an account.';return}
+  if(authMode==='signup'){
+    if(pwd.length<8){err.textContent='Password must be at least 8 characters.';return}
+    const pwd2=(document.getElementById('iPwd2')||{}).value||'';
+    if(pwd!==pwd2){err.textContent='Passwords do not match.';return}
+    if(!consent){err.textContent='Please agree to the Privacy Policy to create an account.';return}
+  }
   btn.disabled=true;const orig=btn.textContent;btn.textContent='…';
   try{
     const body=authMode==='signup'?{email,password:pwd,name,consent:true}:{email,password:pwd};
