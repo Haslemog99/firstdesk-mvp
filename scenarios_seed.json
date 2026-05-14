@@ -1,0 +1,106 @@
+{
+  "version": 1,
+  "note": "Anonymised junior-level job descriptions. The ScenarioExtractor turns each into a multi-tool workplace day. Real-listing fields (company name, location, salary) have been redacted or generalised.",
+  "jobs": [
+    {
+      "ext_id": "seed-acc-001",
+      "career": "accountant",
+      "title": "Junior Accountant — Month-End Close",
+      "company": "MidMarket Manufacturing Group",
+      "location": "Manchester, UK (hybrid)",
+      "seniority": "junior",
+      "description": "Reporting to the Finance Manager, you will support the month-end close, post adjusting journals in Sage Intacct, reconcile bank statements against the GL, code supplier invoices for the AP run, respond to client invoice queries via Outlook, and post status updates in the #finance Slack channel. You will use spreadsheets to chase variances, raise discrepancies for review, and prepare a one-page reconciliation summary. The role requires strong attention to detail across at least four tools (Outlook, Sage, Tasks/Asana, Slack) and clear written communication with both internal stakeholders and external clients.",
+      "tools_mentioned": ["outlook", "sage", "tasks", "slack"]
+    },
+    {
+      "ext_id": "seed-acc-002",
+      "career": "accountant",
+      "title": "Junior Finance Analyst — VAT & Compliance",
+      "company": "Specialist Healthcare Services Ltd",
+      "location": "Leeds, UK",
+      "seniority": "junior",
+      "description": "Working alongside the senior accountant, you will own the day-to-day handling of VAT-sensitive invoices: identifying mis-applied VAT on exempt services, raising credit notes in Sage, replying to client queries within SLA, and posting weekly compliance summaries to the #grc Slack channel. The successful candidate will be comfortable jumping between Outlook (client correspondence), Sage (ledger postings), Tasks (workflow tracking), and Slack (broadcast updates). Candidates must escalate any HMRC-relevant findings to the Finance Director with documented evidence.",
+      "tools_mentioned": ["outlook", "sage", "tasks", "slack"]
+    },
+    {
+      "ext_id": "seed-acc-003",
+      "career": "accountant",
+      "title": "Graduate Accounts Assistant — Multi-entity",
+      "company": "Hospitality Holdings",
+      "location": "Birmingham, UK",
+      "seniority": "graduate",
+      "description": "Process supplier invoices across three trading entities, post intercompany journals, reconcile petty cash and credit-card statements, and resolve invoice queries from clients. You will draft the management accounts pack with revenue commentary, post a daily standup in Slack covering anomalies, and use Outlook to chase outstanding POs from purchasing managers. Strong Excel and Sage skills required; expect to use four tools in any given task.",
+      "tools_mentioned": ["outlook", "sage", "tasks", "slack"]
+    },
+    {
+      "ext_id": "seed-cyb-001",
+      "career": "cybersecurity",
+      "title": "SOC Analyst (L1) — Detection & Response",
+      "company": "Managed Security Services Provider",
+      "location": "London, UK (24/7 shifts)",
+      "seniority": "junior",
+      "description": "Triage SIEM alerts in Splunk, escalate true-positives by opening Jira incident tickets, notify affected client contacts via Outlook, and post containment updates to #soc-alerts on Slack. You'll cross-reference IOCs against last 30 days of alerts, document new IOCs in the playbook, and run weekly phishing click-through reports. The role spans four tools per incident — SIEM, Jira, Outlook, Slack — and demands disciplined ticket hygiene.",
+      "tools_mentioned": ["siem", "jira", "outlook", "slack", "tasks"]
+    },
+    {
+      "ext_id": "seed-cyb-002",
+      "career": "cybersecurity",
+      "title": "Junior Threat Intel Analyst",
+      "company": "Financial Services CISO Office",
+      "location": "Edinburgh, UK",
+      "seniority": "junior",
+      "description": "Investigate suspected data-exfiltration incidents reported by client CTOs, correlate SIEM evidence with threat-intel feeds, raise containment Jira tickets, and brief the SOC manager via Outlook with timeline + impact + recommended actions. Daily Slack updates in #threat-intel are mandatory. The successful candidate will write postmortems, maintain the IOC watchlist, and respond to ICO-relevant breaches within 72 hours.",
+      "tools_mentioned": ["siem", "jira", "outlook", "slack", "tasks"]
+    },
+    {
+      "ext_id": "seed-cyb-003",
+      "career": "cybersecurity",
+      "title": "Junior GRC & Compliance Analyst",
+      "company": "Cloud Infrastructure SaaS",
+      "location": "Bristol, UK (remote)",
+      "seniority": "junior",
+      "description": "Collect ISO 27001 control evidence (event logging, incident response, network controls), attach screenshots/logs to Jira COMP tickets, coordinate with the SOC team on alert evidence (SIEM exports), and post deadline reminders to #grc Slack. Use Outlook to chase control owners, Tasks to track outstanding items, and SIEM to pull last-30-days log evidence for auditors arriving Monday.",
+      "tools_mentioned": ["jira", "siem", "outlook", "slack", "tasks"]
+    },
+    {
+      "ext_id": "seed-mkt-001",
+      "career": "marketing",
+      "title": "Junior Marketing Coordinator — Product Launch",
+      "company": "Consumer Tech Brand",
+      "location": "London, UK",
+      "seniority": "junior",
+      "description": "Draft launch-week social posts in Hootsuite (LinkedIn, Twitter, Instagram), apply the v2 brand guidelines (Deep Teal #0D9488, tone: bold and innovative), schedule across platforms, and post a creative-review thread in #marketing Slack. Liaise with the brand client over Outlook, log content tasks in Tasks, and pull last-month engagement numbers for the board pack. Expect to operate across at least four tools per campaign drop.",
+      "tools_mentioned": ["campaigns", "outlook", "slack", "tasks"]
+    },
+    {
+      "ext_id": "seed-mkt-002",
+      "career": "marketing",
+      "title": "Influencer Partnerships Coordinator",
+      "company": "Lifestyle DTC Agency",
+      "location": "Manchester, UK",
+      "seniority": "junior",
+      "description": "Shortlist creators from the partnerships inbox, draft briefs aligned with client brand guidelines, broadcast picks in #partnerships Slack for senior approval, schedule collab posts in the campaigns tool, and respond to creator queries via Outlook within 24h. You will also pull weekly engagement metrics and update the influencer CRM. Cross-tool coordination across Outlook, Campaigns, Slack, and Tasks is daily.",
+      "tools_mentioned": ["outlook", "campaigns", "slack", "tasks"]
+    },
+    {
+      "ext_id": "seed-dev-001",
+      "career": "developer",
+      "title": "Junior Full-Stack Engineer — Bug Triage Sprint",
+      "company": "B2B SaaS Platform",
+      "location": "London, UK (hybrid)",
+      "seniority": "junior",
+      "description": "Pick up open Jira bugs in mid-sprint (Safari login crash, profile-image 403, dark-mode scope change), reproduce, fix, open PRs, and post review requests in #engineering Slack. CI failures are owned by you (per CODEOWNERS); fix flaky tests promptly. Coordinate scope changes with Product over Outlook, log subtasks in Tasks, and write a postmortem within 48h of any P1.",
+      "tools_mentioned": ["jira", "outlook", "slack", "tasks"]
+    },
+    {
+      "ext_id": "seed-dev-002",
+      "career": "developer",
+      "title": "Junior Backend Engineer — On-call Rotation",
+      "company": "Fintech Scale-up",
+      "location": "Remote (UK)",
+      "seniority": "junior",
+      "description": "Respond to PagerDuty pages, open INC-* Jira tickets, post incident updates to #incidents Slack every 15 minutes, email status to stakeholders via Outlook, and after the all-clear, write the postmortem document. CI flakiness on main is yours to fix. The role demands fluency across Jira, Slack, Outlook, and Tasks — all simultaneously during an incident.",
+      "tools_mentioned": ["jira", "outlook", "slack", "tasks"]
+    }
+  ]
+}

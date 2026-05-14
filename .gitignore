@@ -1,0 +1,42 @@
+# Secrets / local config
+.env
+.env.local
+.env.*.local
+run.sh
+
+# Logs
+*.log
+server.log
+nohup.out
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Virtualenvs
+.venv/
+venv/
+env/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*~
+
+# Claude / agent state
+.claude/
+
+# Local DB / dumps
+*.sqlite
+*.db
+dump/
