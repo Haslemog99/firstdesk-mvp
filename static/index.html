@@ -1191,6 +1191,7 @@ function backToChooser(){const ch=document.getElementById('pathChooser');const s
 function showDesktop(){document.body.classList.add('desk-mode');document.getElementById('authScreen').classList.remove('on');document.getElementById('careerSelect').classList.remove('on');document.getElementById('desktop').classList.add('active');document.getElementById('taskbar').classList.add('active');document.querySelector('.brand').style.display='none';_syncGuestBanner();try{_startSimClockPoll()}catch(e){}}
 function _syncGuestBanner(){const b=document.getElementById('guestBanner');if(!b)return;const isGuest=!!(currentUser&&currentUser.is_guest);const onDesktop=document.body.classList.contains('desk-mode');b.classList.toggle('on',isGuest&&onDesktop)}
 let authMode='signin';
+function _errMsg(d){if(!d)return'';const x=d.detail!==undefined?d.detail:(d.message||d.error);if(!x)return'';if(typeof x==='string')return x;if(Array.isArray(x))return x.map(v=>(v&&(v.msg||v.message))||'').filter(Boolean).join('; ')||'';if(typeof x==='object')return x.message||x.error||x.msg||(d.message||d.error||'');return String(x)}
 function setAuthMode(m){authMode=m;document.getElementById('tabSignin').classList.toggle('on',m==='signin');document.getElementById('tabSignup').classList.toggle('on',m==='signup');document.getElementById('nameField').style.display=m==='signup'?'block':'none';const cf=document.getElementById('consentField');if(cf)cf.style.display=m==='signup'?'block':'none';document.getElementById('authTitle').textContent=m==='signup'?'Create your desk':'Welcome back';document.getElementById('authSub').textContent=m==='signup'?'Start your training. We save your progress.':'Sign in to continue your training.';document.getElementById('authBtn').textContent=m==='signup'?'Create account':'Sign in';document.getElementById('authErr').textContent='';document.getElementById('iPwd').setAttribute('autocomplete',m==='signup'?'new-password':'current-password')}
 async function submitAuth(e){
   e.preventDefault();
@@ -1206,7 +1207,7 @@ async function submitAuth(e){
     const body=authMode==='signup'?{email,password:pwd,name,consent:true}:{email,password:pwd};
     const r=await _origFetch(A+'/api/auth/'+authMode,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
     const d=await r.json();
-    if(!r.ok){err.textContent=d.detail||d.error||'Something went wrong';btn.disabled=false;btn.textContent=orig;return}
+    if(!r.ok){err.textContent=_errMsg(d)||'Something went wrong';btn.disabled=false;btn.textContent=orig;return}
     localStorage.setItem(TKEY,d.token);currentUser=d.user;
     showLanding();
   }catch(ex){err.textContent='Network error';btn.disabled=false;btn.textContent=orig}
@@ -1217,7 +1218,7 @@ async function tryAsGuest(){
   try{
     const r=await _origFetch(A+'/api/auth/guest',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});
     const d=await r.json();
-    if(!r.ok){if(err)err.textContent=d.detail||d.error||'Could not start guest session';return}
+    if(!r.ok){if(err)err.textContent=_errMsg(d)||'Could not start guest session';return}
     localStorage.setItem(TKEY,d.token);currentUser=d.user;
     showLanding();
   }catch(ex){if(err)err.textContent='Network error'}
