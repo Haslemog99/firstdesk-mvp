@@ -1069,7 +1069,7 @@ button{cursor:pointer}
 <h3>Bring your own job description</h3>
 <p class="jd-sub">Paste a public job listing URL (Greenhouse, Lever, Workable, Ashby, Indeed, Reed, Wellfound) or the description text. We'll generate a tailored day with 5 connected tools, multi-step workflows, and AI coworkers shaped by the role.</p>
 <div class="jd-tabs"><div class="jd-tab on" id="jdTabUrl" onclick="jdSwitch('url')">Paste URL</div><div class="jd-tab" id="jdTabText" onclick="jdSwitch('text')">Paste text</div></div>
-<div class="jd-row"><label>Career track</label><select id="jdCareer"><option value="accountant">Accountant — Finance</option><option value="cybersecurity">Cybersecurity Analyst — SOC</option><option value="marketing">Marketing Coordinator</option><option value="developer">Software Engineer</option><option value="procurement">IT Procurement Specialist</option><option value="hr">L&amp;D Specialist — People</option><option value="pm">Product Manager — Growth</option></select></div>
+<div class="jd-row"><label>Career track</label><select id="jdCareer"><option value="auto" selected>✨ Auto-detect from job description (works for any role)</option><option disabled style="color:#52525b">── or pick a specific track ──</option><option value="accountant">Accountant — Finance</option><option value="cybersecurity">Cybersecurity Analyst — SOC</option><option value="marketing">Marketing / Sales / Growth</option><option value="developer">Software Engineer</option><option value="procurement">IT Procurement / Ops</option><option value="hr">L&amp;D / People / Recruiting</option><option value="pm">Product Manager / Designer / Analyst</option></select></div>
 <div class="jd-row" id="jdRowUrl"><label>Listing URL</label><input id="jdUrl" type="url" placeholder="https://boards.greenhouse.io/company/jobs/123…"></div>
 <div class="jd-row" id="jdRowText" style="display:none"><label>Description</label><textarea id="jdText" placeholder="Paste the full job description here. We use the responsibilities and tools mentioned to generate your simulation."></textarea></div>
 <div class="jd-row"><label>Company (optional)</label><input id="jdCompany" type="text" placeholder="e.g. Stripe, Monzo, Acme Health"></div>
@@ -1446,7 +1446,12 @@ if(jd){
     d=await r.json();
     if(!r.ok){const msg=(d&&d.error&&d.error.message)||(d&&d.error)||'Could not generate scenario.';hideLoader();toast(msg,'error');return}
   }catch(e){hideLoader();toast('Network error. Try again.','error');return}
-  await _bootSimulation(d, career);
+  // If user picked auto-detect, surface what the backend resolved to
+  if(d&&d.career_auto_detected&&d.career){
+    const _careerLabels={accountant:'Accountant',cybersecurity:'Cybersecurity Analyst',marketing:'Marketing / Growth',developer:'Software Engineer',procurement:'Procurement / Ops',hr:'L&D / People',pm:'Product Manager'};
+    toast('Detected role: '+(_careerLabels[d.career]||d.career),'success');
+  }
+  await _bootSimulation(d, (d&&d.career)||career);
   return;
 }
 // Hard-coded career flow

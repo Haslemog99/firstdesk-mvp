@@ -4648,8 +4648,38 @@ def _fetch_jd_from_url(url: str) -> tuple[str, str]:
         raise HTTPException(422, "The page didn't contain enough readable text. Paste the description directly.")
     return title[:200], text[:8000]
 
+_CAREER_CLASSIFIER_PROMPT = (
+    "You classify a job description into ONE of seven workplace simulator careers. "
+    "Pick the SINGLE closest fit. Reply with ONE word only.\n"
+    "- accountant: finance, accounting, AP/AR, bookkeeping, audit, controller, FP&A, treasury, payroll\n"
+    "- cybersecurity: SOC analyst, security engineer, infosec, threat detection, incident response, GRC, SIEM\n"
+    "- marketing: marketing, growth, content, SEO, brand, social, demand gen, comms, PR, copywriter, sales/SDR/BDR/AE/CSM (closest match for sales roles)\n"
+    "- developer: software engineer, backend, frontend, full-stack, mobile, devops, SRE, data engineer, ML engineer, QA\n"
+    "- procurement: procurement, sourcing, vendor management, supply chain, purchasing, contracts, operations/ops (closest match)\n"
+    "- hr: HR, people, L&D, talent, recruiting, training, organisational development, employee relations\n"
+    "- pm: product manager, product owner, UX designer, product designer, researcher, business analyst, data analyst (closest match)\n"
+    "If unclear, default to the closest functional fit. Reply with EXACTLY one word from this list."
+)
+_VALID_CAREERS = {"accountant", "cybersecurity", "marketing", "developer", "procurement", "hr", "pm"}
+
+def _classify_career_from_jd(jd_text: str, title: str = "") -> str:
+    """Pick the closest of the 7 careers for a free-form JD. Falls back to 'pm' on failure."""
+    snippet = (title + "\n\n" + (jd_text or ""))[:3000].strip()
+    if not snippet:
+        return "pm"
+    try:
+        resp = llm.invoke([("system", _CAREER_CLASSIFIER_PROMPT), ("human", snippet)])
+        choice = (getattr(resp, "content", "") or "").strip().lower().split()[0] if resp else ""
+        choice = choice.strip(".,:;()\"'")
+        if choice in _VALID_CAREERS:
+            log.info("jd.career_classified=%s title=%r", choice, title[:60])
+            return choice
+    except Exception as ex:
+        log.warning("jd.classify_failed kind=%s", type(ex).__name__)
+    return "pm"
+
 class JDIngestReq(BaseModel):
-    career: str = Field(..., pattern=r"^(accountant|cybersecurity|marketing|developer|procurement|hr|pm)$")
+    career: str = Field("auto", pattern=r"^(auto|accountant|cybersecurity|marketing|developer|procurement|hr|pm)$")
     experience_level: str = Field("experienced", pattern=r"^(experienced|studied|beginner)$")
     url: Optional[str] = Field(None, max_length=2000)
     text: Optional[str] = Field(None, max_length=20000)
@@ -4681,11 +4711,16 @@ async def api_scenario_from_jd(req: JDIngestReq, request: Request):
             jd_title = req.title.strip()[:200]
     company = (req.company or "Custom Scenario Co").strip()[:120] or "Custom Scenario Co"
 
+    # Auto-classify career if the user picked "Auto-detect" (or any role outside our 7 fixed tracks)
+    resolved_career = req.career
+    if resolved_career == "auto":
+        resolved_career = _classify_career_from_jd(jd_text, jd_title)
+
     # Build a JobPosting and run it through the extractor + materializer directly.
     from scenario_engine import JobPosting as _JP
     job = _JP(
         ext_id=f"user:{uid}:{int(now)}",
-        career=req.career,
+        career=resolved_career,
         title=jd_title,
         company=company,
         description=jd_text,
@@ -4726,28 +4761,29 @@ async def api_scenario_from_jd(req: JDIngestReq, request: Request):
         })
 
     # Reset this user's sim state and materialise the new scenario into it
-    _career_var.set(req.career)
+    _career_var.set(resolved_career)
     reset_chat_history()
     clear_sim()
-    cfg = CAREER_CONFIGS[req.career]
+    cfg = CAREER_CONFIGS[resolved_career]
     summary = engine.materializer.materialise(template, sim_id())
-    engine.mark_seen(uid, template.scenario_id, req.career)
+    engine.mark_seen(uid, template.scenario_id, resolved_career)
 
     _tag_day1_artifacts()
-    init_session(req.career, req.experience_level)
+    init_session(resolved_career, req.experience_level)
     init_reputation()
-    set_orchestrator(create_orchestrator(req.career, req.experience_level))
+    set_orchestrator(create_orchestrator(resolved_career, req.experience_level))
     progress_col.update_one(
         {"user_id": uid},
-        {"$set": {"current_career": req.career, "current_day": 1,
+        {"$set": {"current_career": resolved_career, "current_day": 1,
                   "started_career_at": datetime.utcnow().isoformat()}},
         upsert=True,
     )
     log.info("scenario.from_jd user=%s career=%s scenario=%s tasks=%d emails=%d",
-             uid, req.career, template.scenario_id, summary["tasks"], summary["emails"])
+             uid, resolved_career, template.scenario_id, summary["tasks"], summary["emails"])
     return {
         "status": "started",
-        "career": req.career,
+        "career": resolved_career,
+        "career_auto_detected": req.career == "auto",
         "title": cfg["title"],
         "company": summary.get("company", cfg["company"]),
         "tools": list(summary.get("tools_palette") or cfg["tools"]),
