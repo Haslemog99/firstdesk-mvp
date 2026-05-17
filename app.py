@@ -2205,6 +2205,109 @@ def _grade_for(total: int) -> tuple[str, str]:
     if total >= 40: return "C",  "Needs Development"
     return "D", "Not Yet Ready"
 
+def _compute_behavioral_fingerprint(s: dict, sim: str) -> dict:
+    """Behavioural telemetry summarised from actions_col + emails/tasks + session.
+
+    Read-only — never writes. Tolerant of missing fields so old sims still
+    produce a valid (mostly-zero) fingerprint."""
+    rs_iso = s.get("real_start_time") or s.get("started_at")
+    try:
+        sess_start = datetime.fromisoformat(rs_iso) if rs_iso else None
+    except Exception:
+        sess_start = None
+
+    acts = list(actions_col.find({"simulation_id": sim}, {"_id": 0}).sort("ts", 1))
+
+    def _ts(a):
+        try: return datetime.fromisoformat(a.get("ts"))
+        except Exception: return None
+
+    # 1. time to first action
+    ttf = 0
+    if acts and sess_start:
+        first = _ts(acts[0])
+        if first:
+            ttf = max(0, int((first - sess_start).total_seconds()))
+
+    # 2. email read order — from sessions.emails_read (insertion-order $addToSet)
+    email_read_order = list(s.get("emails_read") or [])
+
+    # 3. task start order — tasks with started_at, oldest first
+    started = list(tasks_col.find(
+        {"simulation_id": sim, "started_at": {"$exists": True}},
+        {"id": 1, "started_at": 1, "_id": 0}).sort("started_at", 1))
+    task_start_order = [t.get("id") for t in started if t.get("id")]
+
+    # 4. avg response time: pair email_open events with the matching reply event
+    opens = {}
+    deltas = []
+    for a in acts:
+        kind = a.get("kind"); eid = a.get("email_id")
+        if not (kind and eid): continue
+        t = _ts(a)
+        if not t: continue
+        if kind == "email_open":
+            opens[eid] = t
+        elif kind == "email_reply" and eid in opens:
+            d = (t - opens[eid]).total_seconds()
+            if 0 <= d <= 60*60*4:  # cap absurd gaps
+                deltas.append(d)
+    avg_resp = int(sum(deltas) / len(deltas)) if deltas else 0
+
+    # 5. help requests — heuristic over chat messages
+    HELP_RE = re.compile(r"\b(help|how do i|what should i|can you|not sure|clarify|stuck|confused|unsure)\b", re.I)
+    help_n = sum(1 for a in acts if isinstance(a.get("action"), str) and HELP_RE.search(a["action"]))
+
+    # 6. tool switches — counted from explicit tracking events
+    tool_switches = sum(1 for a in acts if a.get("kind") == "tool_switch")
+
+    # 7. idle periods — gaps > 5min between consecutive actions
+    idle_periods = []
+    prev = None
+    for a in acts:
+        cur = _ts(a)
+        if cur and prev:
+            gap = (cur - prev).total_seconds()
+            if gap >= 300:  # 5+ minutes
+                idle_periods.append({"start": prev.isoformat(), "end": cur.isoformat(), "sec": int(gap)})
+        prev = cur
+    # Cap to first 10 to keep payload small
+    idle_periods = idle_periods[:10]
+
+    # 8. pushback instances — kept as a count surfaced from existing scoring signals
+    pushback = []
+    if s.get("rejected_unethical"): pushback.append("rejected_unethical_request")
+    if s.get("rejected_brand_violation"): pushback.append("rejected_brand_violation")
+    if s.get("outage_reported") or s.get("it_outage_reported"): pushback.append("escalated_outage")
+    if s.get("reported_pii_breach"): pushback.append("reported_pii_breach")
+
+    # 9. error→correct count — beginner_first_mistakes counts (one per kind that was self-corrected)
+    err_corr = len(s.get("beginner_first_mistakes") or [])
+
+    # 10. prioritisation accuracy (0..1) — derived from the EOD prioritisation subscore (out of 20)
+    last_eval = evals_col.find_one(
+        {"simulation_id": sim, "type": "end_of_day_review"},
+        sort=[("ts", -1)])
+    prio_acc = 0.0
+    if last_eval:
+        prio = (last_eval.get("dimensions") or {}).get("prioritisation")
+        if prio is not None:
+            try: prio_acc = round(min(1.0, max(0.0, float(prio) / 20.0)), 2)
+            except Exception: pass
+
+    return {
+        "time_to_first_action_sec": ttf,
+        "email_read_order": email_read_order[:50],
+        "task_start_order": task_start_order[:50],
+        "avg_response_time_sec": avg_resp,
+        "help_requests_count": help_n,
+        "tool_switch_frequency": tool_switches,
+        "idle_periods": idle_periods,
+        "pushback_instances": pushback,
+        "error_then_correct_count": err_corr,
+        "prioritisation_accuracy": prio_acc,
+    }
+
 def _compute_eod():
     """FirstDesk Score — six-dimension employability scorecard (0-100).
     Backward-compat: still emits `total_score`, `level`, and the legacy summary
@@ -2379,6 +2482,7 @@ def _compute_eod():
             "speed_efficiency":  f"{speed}/10",
         },
         "manager_notes": notes, "notes": notes,
+        "behavioral_fingerprint": _compute_behavioral_fingerprint(s, sim),
         "ts": datetime.utcnow().isoformat(),
     }
 
@@ -3397,6 +3501,33 @@ _USER_DATA_COLS_BY_SIM_ID = (
 # and its primary key is session_id. Deleted separately by session_id.
 _USER_DATA_COLS_BY_SESSION_ID = ("sessions_col",)
 
+class TrackReq(BaseModel):
+    kind: str = Field(..., pattern=r"^(tool_switch|email_open|idle|focus_blur|custom)$", max_length=32)
+    ref: Optional[str] = Field(None, max_length=120)
+
+@app.post("/api/track")
+async def api_track(req: TrackReq):
+    """Lightweight client-side telemetry. Used to compute behavioural fingerprint
+    (tool switches, idle/focus blur, etc.). Always returns 200 so the UI never
+    has to handle errors here."""
+    try:
+        actions_col.insert_one({
+            "simulation_id": sim_id(),
+            "kind": req.kind,
+            "ref": req.ref,
+            "ts": datetime.utcnow().isoformat(),
+        })
+    except Exception:
+        pass
+    return {"status": "ok"}
+
+@app.get("/api/profile/fingerprint")
+async def api_fingerprint():
+    """Behavioural fingerprint for the user's current/most-recent simulation."""
+    s = sessions_col.find_one({"session_id": session_id()}, {"_id": 0}) or {}
+    sim = sim_id()
+    return _compute_behavioral_fingerprint(s, sim)
+
 @app.get("/api/profile/history")
 async def profile_history(request: Request):
     """Past sims (best score per career) + past interviews + aggregate
@@ -3646,6 +3777,8 @@ async def chat(req: ChatReq, request: Request, background: BackgroundTasks):
 async def api_mark_read(email_id: str):
     emails_col.update_one({"id": email_id, "simulation_id": sim_id()}, {"$set": {"read": True}})
     sessions_col.update_one({"session_id": session_id()}, {"$addToSet": {"emails_read": email_id}})
+    actions_col.insert_one({"simulation_id": sim_id(), "kind": "email_open", "email_id": email_id,
+                            "ts": datetime.utcnow().isoformat()})
     return {"status": "ok"}
 
 @app.get("/api/sent")
@@ -3691,7 +3824,9 @@ async def api_reply(req: ReplyReq):
         {"$set": {"replied": True, "reply_text": req.text, "reply_time": datetime.utcnow().strftime("%H:%M")}},
     )
     sessions_col.update_one({"session_id": session_id()}, {"$addToSet": {"emails_replied": req.email_id}})
-    actions_col.insert_one({"simulation_id": sim_id(), "action": f"reply:{req.email_id}:{req.text[:200]}", "ts": datetime.utcnow().isoformat()})
+    actions_col.insert_one({"simulation_id": sim_id(), "kind": "email_reply", "email_id": req.email_id,
+                            "action": f"reply:{req.email_id}:{req.text[:200]}",
+                            "ts": datetime.utcnow().isoformat()})
     # Tone observer + escalations also apply to email replies
     observe_tone(req.text)
     check_escalations()
