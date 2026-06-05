@@ -70,6 +70,7 @@ from tool_dispatch import (
     dispatch_action as tool_dispatch_action,
     normalise_tool_spec,
 )
+from workplace_physics import WorkplacePhysicsEngine, WORKPLACE_PHYSICS
 
 MONGO_URI = os.environ.get("MONGO_URI", "mongodb://localhost:27017")
 FIREWORKS_KEY = os.environ.get("FIREWORKS_API_KEY", "")
@@ -5111,6 +5112,11 @@ async def api_tool_get(tool_id: str):
 class ToolActionReq(BaseModel):
     action: str = Field(..., min_length=1, max_length=40)
     params: dict[str, Any] = Field(default_factory=dict)
+    # Workplace-physics extension (optional; backward compatible).
+    # Frontend passes `action_key` (e.g. "siem.escalate_alert_correct") +
+    # `context` (template variables for the rule's email/slack bodies).
+    action_key: Optional[str] = Field(None, pattern=r"^[a-z_]+\.[a-z_]+$", max_length=64)
+    context: dict[str, Any] = Field(default_factory=dict)
 
 
 @app.post("/api/tool/{tool_id}/action")
@@ -5176,8 +5182,90 @@ async def api_tool_action(tool_id: str, req: ToolActionReq):
     for name, payload in (res.get("events") or []):
         emit(name, dict(payload))
 
-    return {"ok": res["ok"], "result": res, "tool": tools_col.find_one(
-        {"tool_id": tool_id, "simulation_id": sim_id()}, {"_id": 0})}
+    # ── Workplace physics: cross-tool causality cascade ──
+    # The engine runs additively on top of the existing pipeline; if the
+    # frontend didn't send an action_key, the cascade is a no-op.
+    physics_effects: list[dict] = []
+    if req.action_key:
+        try:
+            sess = sessions_col.find_one({"session_id": session_id()}, {"_id": 0}) or {}
+            cfg = CAREER_CONFIGS.get(get_career() or "accountant", CAREER_CONFIGS["accountant"])
+            engine = WorkplacePhysicsEngine(
+                emails_col=emails_col, tasks_col=tasks_col, tools_col=tools_col,
+                slack_col=slack_col, evals_col=evals_col, jira_col=jira_col,
+                sessions_col=sessions_col,
+                career_config=cfg,
+                sim_id=sim_id(), session_id=session_id(),
+                user_id=sess.get("user_id") or "anon",
+                user_name=(sess.get("user_name") or sess.get("name") or "you"),
+            )
+            physics_effects = engine.process(req.action_key, dict(req.context or {}))
+        except Exception as ex:
+            log.warning("workplace_physics.fail key=%s err=%s", req.action_key, ex)
+
+    return {
+        "ok": res["ok"],
+        "result": res,
+        "tool": tools_col.find_one({"tool_id": tool_id, "simulation_id": sim_id()}, {"_id": 0}),
+        "effects": physics_effects,
+        "effects_count": len(physics_effects),
+    }
+
+
+class PhysicsFireReq(BaseModel):
+    action_key: str = Field(..., pattern=r"^[a-z_]+\.[a-z_]+$", max_length=64)
+    context: dict[str, Any] = Field(default_factory=dict)
+
+
+@app.post("/api/physics/fire")
+async def api_physics_fire(req: PhysicsFireReq):
+    """Fire a workplace-physics rule directly (no tool action involved).
+    Used by frontend buttons that aren't tool-scoped (email replies, task
+    completions, IT outage reports, etc.)."""
+    if req.action_key not in WORKPLACE_PHYSICS:
+        raise HTTPException(404, "Unknown physics rule")
+    sess = sessions_col.find_one({"session_id": session_id()}, {"_id": 0}) or {}
+    cfg = CAREER_CONFIGS.get(get_career() or "accountant", CAREER_CONFIGS["accountant"])
+    engine = WorkplacePhysicsEngine(
+        emails_col=emails_col, tasks_col=tasks_col, tools_col=tools_col,
+        slack_col=slack_col, evals_col=evals_col, jira_col=jira_col,
+        sessions_col=sessions_col,
+        career_config=cfg,
+        sim_id=sim_id(), session_id=session_id(),
+        user_id=sess.get("user_id") or "anon",
+        user_name=(sess.get("user_name") or sess.get("name") or "you"),
+    )
+    effects = engine.process(req.action_key, dict(req.context or {}))
+    return {"effects": effects, "effects_count": len(effects)}
+
+
+@app.get("/api/score/physics")
+async def api_physics_score():
+    """Aggregate the running physics-driven score for the current sim,
+    plus a recent-history feed of physics notes for the EOD review."""
+    _sim = sim_id()
+    pipeline = [
+        {"$match": {"simulation_id": _sim, "source": "workplace_physics"}},
+        {"$group": {
+            "_id": None,
+            "total": {"$sum": "$points"},
+            "positive": {"$sum": {"$cond": [{"$gt": ["$points", 0]}, "$points", 0]}},
+            "negative": {"$sum": {"$cond": [{"$lt": ["$points", 0]}, "$points", 0]}},
+            "n": {"$sum": 1},
+        }},
+    ]
+    agg = next(iter(evals_col.aggregate(pipeline)), None) or {}
+    notes = list(evals_col.find(
+        {"simulation_id": _sim, "source": "workplace_physics"},
+        {"_id": 0, "note": 1, "points": 1, "ts": 1},
+    ).sort("ts", -1).limit(50))
+    return {
+        "physics_score": int(agg.get("total", 0) or 0),
+        "positive_points": int(agg.get("positive", 0) or 0),
+        "negative_points": int(agg.get("negative", 0) or 0),
+        "events_count": int(agg.get("n", 0) or 0),
+        "notes": notes,
+    }
 
 
 # ── LangChain wrappers so the orchestrator agent can read & write tools ──

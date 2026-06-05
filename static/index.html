@@ -745,6 +745,15 @@ button{cursor:pointer}
 .lo.on{display:flex;animation:moFadeIn .26s var(--ease-out)}
 .lo-spin{width:48px;height:48px;border-radius:50%;position:relative;background:conic-gradient(from 0deg,transparent 0%,#60a5fa 30%,#a78bfa 60%,#ec4899 90%,transparent 100%);animation:spin 1s linear infinite;mask:radial-gradient(circle,transparent 56%,black 58%);-webkit-mask:radial-gradient(circle,transparent 56%,black 58%)}
 @keyframes spin{to{transform:rotate(360deg)}}
+@keyframes physicsSlideIn{from{transform:translateX(120%);opacity:0}to{transform:translateX(0);opacity:1}}
+@keyframes physicsSlideOut{from{transform:translateX(0);opacity:1}to{transform:translateX(120%);opacity:0}}
+.physics-stack{position:fixed;bottom:72px;right:18px;display:flex;flex-direction:column;gap:8px;z-index:9990;pointer-events:none}
+.physics-toast{background:#0f172a;color:#f1f5f9;padding:11px 14px 11px 14px;border-radius:10px;border-left:3px solid #3b82f6;font-size:12.5px;font-family:var(--ff);letter-spacing:-0.005em;line-height:1.45;box-shadow:0 8px 24px rgba(0,0,0,0.32),0 0 0 1px rgba(255,255,255,0.04);max-width:300px;animation:physicsSlideIn .28s var(--ease-out);pointer-events:auto;display:flex;align-items:flex-start;gap:9px}
+.physics-toast.out{animation:physicsSlideOut .24s ease-in forwards}
+.physics-toast.pos{border-left-color:#10b981}
+.physics-toast.neg{border-left-color:#ef4444}
+.physics-toast .pt-ico{flex:0 0 auto;font-size:14px;line-height:1.2}
+.physics-toast .pt-txt{flex:1 1 auto;min-width:0}
 .lo-msg{color:#f1f5f9;font-size:15px;font-weight:500;letter-spacing:-0.01em;max-width:440px;text-align:center;line-height:1.4}
 .lo-sub{color:#64748b;font-size:12.5px;letter-spacing:-0.005em;max-width:380px;text-align:center;line-height:1.5}
 /* Toasts — refined Sonoma notification feel */
@@ -2058,6 +2067,63 @@ async function sr(){
   finally{btn.disabled=false;btn.textContent='▶ Send'}
 }
 // Tool data
+// ── Workplace Physics Engine (frontend) ────────────────
+// firePhysics: standalone effect cascade (email/task/IT triggers).
+// submitToolAction: wraps /api/tool/{id}/action and renders the cascade.
+// Both render staggered toasts and refresh affected views.
+const _PHY_ICONS={agent_email:'📧',slack_message:'💬',create_jira_ticket:'🎫',tool_update:'🔄',performance_note:'★'};
+function _physicsToastText(ef){
+  if(ef.type==='agent_email')        return 'New email: '+(ef.subject||'check inbox');
+  if(ef.type==='slack_message')      return (ef.channel||'#chan')+' · '+((ef.message||'').slice(0,72));
+  if(ef.type==='create_jira_ticket') return 'Jira: '+ef.ticket_id+' — '+(ef.title||'').slice(0,48);
+  if(ef.type==='tool_update')        return (ef.tool||'tool')+' updated';
+  if(ef.type==='performance_note'){
+    const p=ef.points||0; const sgn=p>0?'+':''; return (p?sgn+p+' pts · ':'')+(ef.note||'');
+  }
+  return ef.type||'event';
+}
+function showPhysicsToast(ef){
+  let stack=document.getElementById('physicsStack');
+  if(!stack){stack=document.createElement('div');stack.id='physicsStack';stack.className='physics-stack';document.body.appendChild(stack)}
+  const el=document.createElement('div');
+  const cls=(ef.type==='performance_note'&&(ef.points||0)<0)?'neg':(ef.type==='performance_note'&&(ef.points||0)>0)?'pos':'';
+  el.className='physics-toast'+(cls?' '+cls:'');
+  el.innerHTML='<span class="pt-ico">'+(_PHY_ICONS[ef.type]||'•')+'</span><span class="pt-txt"></span>';
+  el.querySelector('.pt-txt').textContent=_physicsToastText(ef);
+  stack.appendChild(el);
+  setTimeout(()=>{el.classList.add('out');setTimeout(()=>el.remove(),260)},4200);
+}
+function _refreshAfterPhysics(effects){
+  const has=t=>effects.some(e=>e.type===t);
+  const delay=effects.length*700+400;
+  if(has('agent_email')){setTimeout(()=>{try{li&&li()}catch(e){}try{uc&&uc()}catch(e){}},delay)}
+  if(has('slack_message')){setTimeout(()=>{try{window.loadSlack&&window.loadSlack();if(typeof ct==='string'&&ct==='slack'&&typeof loadTool==='function')loadTool('slack')}catch(e){}},delay)}
+  if(has('create_jira_ticket')){setTimeout(()=>{try{if(typeof ct==='string'&&(ct==='jira'||ct==='tickets')&&typeof loadTool==='function')loadTool(ct)}catch(e){}},delay)}
+  if(has('tool_update')){setTimeout(()=>{try{if(typeof ct==='string'&&typeof loadTool==='function')loadTool(ct)}catch(e){}},delay)}
+}
+async function firePhysics(actionKey,context){
+  try{
+    const r=await fetch(A+'/api/physics/fire',{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+(localStorage.getItem(TKEY)||'')},body:JSON.stringify({action_key:actionKey,context:context||{}})});
+    if(!r.ok)return{effects:[]};
+    const d=await r.json();
+    (d.effects||[]).forEach((ef,i)=>setTimeout(()=>showPhysicsToast(ef),i*700));
+    _refreshAfterPhysics(d.effects||[]);
+    return d;
+  }catch(e){return{effects:[]}}
+}
+async function submitToolAction(toolId,action,actionKey,context,params){
+  const body={action:action,params:params||{}};
+  if(actionKey)body.action_key=actionKey;
+  if(context)body.context=context;
+  const r=await fetch(A+'/api/tool/'+encodeURIComponent(toolId)+'/action',{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+(localStorage.getItem(TKEY)||'')},body:JSON.stringify(body)});
+  const d=await r.json();
+  const effects=d.effects||[];
+  effects.forEach((ef,i)=>setTimeout(()=>showPhysicsToast(ef),i*700));
+  _refreshAfterPhysics(effects);
+  return d;
+}
+window.firePhysics=firePhysics; window.submitToolAction=submitToolAction; window.showPhysicsToast=showPhysicsToast;
+
 function setActionBtn(){const b=document.getElementById('actionBtn');if(!b)return;const map={bank:'+ Post Journal',ledger:'+ Post Journal',tb:'+ Post Journal',pnl:'',bs:'',journals:'+ Post Journal',invoices:'',siem:'',tickets:'+ Update Ticket',jira:'+ Update Ticket',campaigns:'+ Update Campaign'};const lbl=map[ct]||'';if(lbl){b.textContent=lbl;b.style.display='inline-block'}else b.style.display='none'}
 function actionForTool(){if(ct==='bank'||ct==='ledger'||ct==='tb'||ct==='journals')ojm();else if(ct==='tickets'||ct==='jira')pickJira();else if(ct==='campaigns')pickCampaign()}
 async function pickCampaign(){const id=prompt('Campaign ID to update (e.g. camp_001):');if(id)ocum(id.trim())}
