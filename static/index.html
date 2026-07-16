@@ -536,6 +536,31 @@ button{cursor:pointer}
 .sd-row .k{color:#71717a;text-transform:uppercase;font-size:10px;font-weight:700;letter-spacing:0.05em}
 .sd-row .v{color:#1d1d1f;line-height:1.4}
 .sd-row .v.mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:11px}
+/* ── SOC alert card (Splunk/Sentinel-style) ── */
+.sd-rulename{margin:0;font-size:15.5px;line-height:1.3;letter-spacing:-0.012em;font-weight:650;color:#0f172a;flex:1 1 100%}
+.sd-subhead{display:flex;align-items:center;gap:10px;flex-wrap:wrap;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:11px;color:#64748b;margin:2px 0 10px}
+.sd-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:0 22px;margin:4px 0 2px}
+.sd-field{padding:6px 0;border-bottom:0.5px solid rgba(0,0,0,0.05);min-width:0}
+.sd-field.wide{grid-column:1/-1}
+.sd-field .k{color:#71717a;text-transform:uppercase;font-size:9.5px;font-weight:700;letter-spacing:0.06em;margin-bottom:2px}
+.sd-field .v{color:#1d1d1f;font-size:12px;line-height:1.4;word-break:break-word}
+.sd-field .v.mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:11px}
+.sd-trigger{background:#fffbeb;border:0.5px solid #fde68a;border-left:3px solid #f59e0b;border-radius:8px;padding:10px 12px;margin:10px 0 2px}
+.sd-trigger .k{color:#92400e;text-transform:uppercase;font-size:9.5px;font-weight:800;letter-spacing:0.07em;margin-bottom:3px}
+.sd-trigger .v{color:#451a03;font-size:12.5px;line-height:1.5}
+.mitre-tags{display:flex;gap:6px;flex-wrap:wrap;margin-top:4px}
+.mitre-pill.tactic{background:#e0e7ff;color:#3730a3}
+.mitre-pill.technique{background:#f3e8ff;color:#6b21a8}
+.sd-vpill{font-size:10px;font-weight:700;padding:3px 9px;border-radius:999px;letter-spacing:0.02em;display:inline-block}
+.sd-vpill.st-new{background:#dbeafe;color:#1e40af}
+.sd-vpill.st-inprog{background:#fef3c7;color:#92400e}
+.sd-vpill.st-closed{background:#dcfce7;color:#166534}
+.sd-vpill.da-allowed{background:#f1f5f9;color:#475569}
+.sd-vpill.da-blocked{background:#fee2e2;color:#991b1b}
+.sd-vpill.da-quarantined{background:#fef3c7;color:#92400e}
+.sd-vpill.vd-null{background:#f1f5f9;color:#94a3b8}
+.sd-vpill.vd-tp{background:#fee2e2;color:#991b1b}
+.sd-vpill.vd-fp{background:#dcfce7;color:#166534}
 .sd-section{margin-top:12px}
 .sd-section h4{font-size:11px;text-transform:uppercase;letter-spacing:0.06em;color:#52525b;margin:0 0 6px;font-weight:700}
 .sd-log{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:10.5px;background:#0f172a;color:#94e2d5;padding:10px;border-radius:6px;white-space:pre-wrap;word-break:break-all;line-height:1.45;max-height:140px;overflow:auto}
@@ -2306,18 +2331,40 @@ function osd(id){
   const fp=a.false_positive_indicators?('<div class="sd-section"><h4>False Positive Indicators</h4><div class="sd-fp">'+esc(a.false_positive_indicators)+'</div></div>'):'';
   const related=(a.related_alerts||[]).length?('<div class="sd-section"><h4>Related Alerts</h4><div class="sd-related">'+(a.related_alerts||[]).map(rid=>'<a onclick="osd(\''+esc(rid)+'\')">'+esc(rid)+' →</a>').join('')+'</div></div>'):'';
   const banner=isResolved?('<div class="sd-banner '+(a.status==='resolve'?'ok':'bad')+'">Already triaged: <b>'+esc(a.status)+'</b></div>'):'';
-  // Tab 1 — Details (everything except raw log + playbook + timeline)
+  // Tab 1 — Details. SOC-grade card: field grid + MITRE tags + trigger callout.
+  // Every field falls back to the legacy name so pre-enrichment alerts render.
+  const stLbl=a.status_label||(isResolved?'Closed':'New');
+  const stCls=stLbl==='Closed'?'st-closed':(stLbl==='In Progress'?'st-inprog':'st-new');
+  const vd=a.verdict||null;
+  const vdCls=vd==='True Positive'?'vd-tp':(vd?'vd-fp':'vd-null');
+  const da=a.device_action||'';
+  const fld=(k,v,mono,wide)=>'<div class="sd-field'+(wide?' wide':'')+'"><div class="k">'+k+'</div><div class="v'+(mono?' mono':'')+'">'+v+'</div></div>';
+  const trigger=a.trigger_reason||a.description||a.details||'';
+  const desc=(a.description&&a.description!==trigger)?a.description:'';
+  const mitreTags=(a.mitre_tactic_full&&a.mitre_tactic_full!=='-')||(a.mitre_technique&&a.mitre_technique!=='-')
+    ?'<div class="sd-section"><h4>MITRE ATT&amp;CK</h4><div class="mitre-tags">'
+      +((a.mitre_tactic_full&&a.mitre_tactic_full!=='-')||(a.mitre_tactic&&a.mitre_tactic!=='-')?'<span class="mitre-pill tactic">'+esc(a.mitre_tactic_full||a.mitre_tactic)+'</span>':'')
+      +((a.mitre_technique&&a.mitre_technique!=='-')?'<span class="mitre-pill technique" title="'+esc(a.mitre_name||'')+'">'+esc(a.mitre_technique_full||(a.mitre_technique+' '+(a.mitre_name||'')))+'</span>':'')
+      +'</div></div>':'';
   const detailsPane=
     banner
-    +'<div class="sd-row"><div class="k">Timestamp</div><div class="v mono">'+esc(a.timestamp||'—')+'</div></div>'
-    +'<div class="sd-row"><div class="k">Confidence</div><div class="v"><span class="conf-bar"><i style="width:'+conf+'%"></i></span> '+conf+'/100</div></div>'
-    +'<div class="sd-row"><div class="k">Description</div><div class="v">'+esc(a.description||a.details||'')+'</div></div>'
-    +'<div class="sd-section"><h4>Endpoints</h4>'
-    +'<div class="sd-row"><div class="k">Source</div><div class="v mono">'+esc(a.src_ip||'—')+(a.src_host?' · '+esc(a.src_host):'')+(a.src_user?' · '+esc(a.src_user):'')+'</div></div>'
-    +'<div class="sd-row"><div class="k">Destination</div><div class="v mono">'+esc(a.dst_ip||'—')+(a.dst_geo&&a.dst_geo!=='-'?' · '+esc(a.dst_geo):'')+'</div></div>'
-    +(a.dst_reputation?'<div class="sd-row"><div class="k">Reputation</div><div class="v">'+esc(a.dst_reputation)+'</div></div>':'')
-    +(a.affected_asset?'<div class="sd-row"><div class="k">Asset</div><div class="v">'+esc(a.affected_asset)+'</div></div>':'')+'</div>'
-    +(a.mitre_technique?'<div class="sd-section"><h4>MITRE ATT&amp;CK</h4><div class="sd-row"><div class="k">Tactic</div><div class="v">'+esc(a.mitre_tactic||'—')+'</div></div><div class="sd-row"><div class="k">Technique</div><div class="v"><span class="mitre-pill">'+esc(a.mitre_technique)+'</span> '+esc(a.mitre_name||'')+'</div></div></div>':'')
+    +'<div class="sd-grid">'
+    +fld('Event Time',esc(a.event_time||a.timestamp||'—'),true)
+    +fld('Detection Time',esc(a.detection_time||a.timestamp||'—'),true)
+    +fld('Source IP',esc(a.source_ip||a.src_ip||'—'),true)
+    +fld('Destination IP',esc(a.dest_ip||a.dst_ip||'—'),true)
+    +fld('Hostname',esc(a.hostname||a.src_host||'—'),true)
+    +fld('Affected User',esc(a.affected_user||a.src_user||'—'),true)
+    +fld('Log Source',esc(a.log_source||((a.source_detail||a.source||'—'))))
+    +fld('Device Action',da?'<span class="sd-vpill da-'+da.toLowerCase()+'">'+esc(da)+'</span>':'—')
+    +fld('Verdict','<span class="sd-vpill '+vdCls+'">'+esc(vd||'Not set')+'</span>')
+    +fld('Confidence','<span class="conf-bar"><i style="width:'+conf+'%"></i></span> '+conf+'/100')
+    +fld('IP Reputation',esc(a.ip_reputation||a.dst_reputation||'No threat intel match'),false,true)
+    +(a.affected_asset?fld('Affected Asset',esc(a.affected_asset),false,true):'')
+    +'</div>'
+    +(trigger?'<div class="sd-trigger"><div class="k">⚡ Why this fired</div><div class="v">'+esc(trigger)+'</div></div>':'')
+    +(desc?'<div class="sd-row" style="margin-top:8px"><div class="k">Description</div><div class="v">'+esc(desc)+'</div></div>':'')
+    +mitreTags
     +related+fp;
   // Tab 2 — Raw Log
   const logPane=a.raw_log?('<pre class="sd-log">'+esc(a.raw_log)+'</pre>'):'<div class="sd-empty">No raw log captured for this alert.</div>';
@@ -2328,7 +2375,12 @@ function osd(id){
   // Tab 4 — Timeline
   const tlPane=_siemTimelineHTML(a);
   document.getElementById('sdContent').innerHTML=
-    '<div class="sd-head"><h3>'+esc(a.id)+' — '+esc(a.title||'')+'</h3><span class="sev '+sev+'">'+sev+'</span><span class="src-pill">'+esc(a.source||'')+(a.source_detail?' · '+esc(a.source_detail):'')+'</span><span class="sla-pill '+sla.cls+'">'+sla.label+'</span></div>'
+    '<div class="sd-head"><h3 class="sd-rulename">'+esc(a.rule_name||a.title||'')+'</h3>'
+      +'<span class="sev '+sev+'">'+esc(a.severity_label||sev)+'</span>'
+      +'<span class="sd-vpill '+stCls+'">'+esc(stLbl)+'</span>'
+      +'<span class="src-pill">'+esc(a.log_source||((a.source||'')+(a.source_detail?' · '+a.source_detail:'')))+'</span>'
+      +'<span class="sla-pill '+sla.cls+'">'+sla.label+'</span></div>'
+    +'<div class="sd-subhead"><span>'+esc(a.alert_id||a.id)+'</span>'+(a.detection_time?'<span>detected '+esc(a.detection_time)+'</span>':'')+(a.title&&a.rule_name&&a.title!==a.rule_name?'<span>'+esc(a.title)+'</span>':'')+'</div>'
     +'<div class="sd-tabs">'
       +'<div class="sd-tab on" onclick="_sdTab(this,\'details\')">Details</div>'
       +'<div class="sd-tab" onclick="_sdTab(this,\'log\')">Raw Log</div>'

