@@ -1168,7 +1168,7 @@ button{cursor:pointer}
 <!-- Flag Modal -->
 <div class="mo" id="fm"><div class="mod"><h3>🚩 Flag Discrepancy</h3><label>Date</label><input id="fd" placeholder="2026-03-16"><label>Description</label><input id="fdesc" placeholder="Petty cash withdrawal"><label>Type</label><select id="ft"><option value="missing_from_ledger">Missing from Ledger</option><option value="amount_mismatch">Amount Mismatch</option></select><div class="mod-btns"><button class="cc" onclick="cfm()">Cancel</button><button class="ss" onclick="sf()">Flag It</button></div></div></div>
 <!-- SIEM Triage Modal -->
-<div class="mo" id="sm"><div class="mod"><h3>🔒 Triage Alert</h3><label>Alert ID</label><input id="said" placeholder="alert_001"><label>Action</label><select id="sact"><option value="escalate">Escalate (real threat)</option><option value="resolve">Resolve (false positive)</option><option value="investigate">Investigate further</option></select><div class="mod-btns"><button class="cc" onclick="csm()">Cancel</button><button class="ss" onclick="sta()">Submit</button></div></div></div>
+<div class="mo" id="sm"><div class="mod"><h3>🔒 Triage Alert</h3><label>Alert ID</label><input id="said" placeholder="alert_001"><label>Action</label><select id="sact"><option value="investigate">Take Ownership — investigate</option><option value="escalate">Escalate to Tier 2 (True Positive)</option><option value="resolve">Close as False Positive</option></select><div class="mod-btns"><button class="cc" onclick="csm()">Cancel</button><button class="ss" onclick="sta()">Submit</button></div></div></div>
 <!-- SIEM Detail Modal -->
 <div class="mo" id="sd"><div class="mod"><div id="sdContent">Loading…</div><div class="mod-btns"><button class="cc" onclick="csd()">Close</button></div></div></div>
 <div class="mo" id="jd"><div class="mod"><div id="jdContent">Loading…</div><div class="mod-btns"><button class="cc" onclick="cjd()">Close</button></div></div></div>
@@ -1553,7 +1553,7 @@ document.getElementById('flagBtn').style.display='block';
 document.getElementById('flagBtn').textContent='🚩 Flag Discrepancy';
 document.getElementById('flagBtn').onclick=ofm;
 }else if(career==='cybersecurity'){
-document.getElementById('toolTabs').innerHTML='<div class="tp-tab on" onclick="loadTool(\'siem\')">SIEM Alerts</div><div class="tp-tab" onclick="loadTool(\'tickets\')">Incident Tickets</div>';
+document.getElementById('toolTabs').innerHTML='<div class="tp-tab on" onclick="loadTool(\'siem\')">Alert Queue</div><div class="tp-tab" onclick="loadTool(\'tickets\')">Cases</div>';
 document.getElementById('flagBtn').style.display='block';
 document.getElementById('flagBtn').textContent='🔒 Triage Alert';
 document.getElementById('flagBtn').onclick=osm;
@@ -1819,7 +1819,7 @@ function renderAlerts(t,b){
   let html='<div class="gt-alerts">';
   alerts.forEach(a=>{
     const done=a.status&&a.status!=='open';
-    html+=`<div class="a ${esc(a.severity||'')} ${done?'done':''}"><div class="meta"><span>${esc(a.severity||'')}</span><span>${esc(a.id)}</span><span style="margin-left:auto">${esc(a.status||'open')}</span></div><div class="ttl">${esc(a.title||'')}</div><div class="det">${esc((a.details||'').slice(0,240))}</div>${done?'':`<div class="acts"><button class="gt-btn pri" onclick="tgAlertAct('${t.tool_id}','${esc(a.id)}','escalate')">Escalate</button><button class="gt-btn" onclick="tgAlertAct('${t.tool_id}','${esc(a.id)}','investigate')">Investigate</button><button class="gt-btn danger" onclick="tgAlertAct('${t.tool_id}','${esc(a.id)}','resolve')">Resolve (FP)</button></div>`}</div>`;
+    html+=`<div class="a ${esc(a.severity||'')} ${done?'done':''}"><div class="meta"><span>${esc(a.severity||'')}</span><span>${esc(a.id)}</span><span style="margin-left:auto">${esc(a.status||'open')}</span></div><div class="ttl">${esc(a.title||'')}</div><div class="det">${esc((a.details||'').slice(0,240))}</div>${done?'':`<div class="acts"><button class="gt-btn" onclick="tgAlertAct('${t.tool_id}','${esc(a.id)}','investigate')">Take Ownership</button><button class="gt-btn pri" onclick="tgAlertAct('${t.tool_id}','${esc(a.id)}','escalate')">Escalate to Tier 2</button><button class="gt-btn danger" onclick="tgAlertAct('${t.tool_id}','${esc(a.id)}','resolve')">Close — False Positive</button></div>`}</div>`;
   });
   if(!alerts.length)html+='<div class="gt-empty">No alerts</div>';
   html+='</div>';b.innerHTML=html;
@@ -2194,7 +2194,7 @@ else if(type==='bs'){const r=await fetch(A+'/api/spreadsheet');const d=await r.j
 else if(type==='journals'){const r=await fetch(A+'/api/spreadsheet');const d=await r.json();const js=d.journal_entries||[];const fmt=v=>v?'£'+Number(v).toLocaleString('en-GB',{minimumFractionDigits:2}):'';if(!js.length){tbl.innerHTML='<thead><tr><th>Journal Entries</th></tr></thead><tbody><tr><td style="text-align:center;color:#999;padding:20px">No journal entries.</td></tr></tbody>';return}let html='<thead><tr><th>Journal</th><th>Date</th><th>Account</th><th>Narrative</th><th>Debit</th><th>Credit</th><th>Status</th></tr></thead><tbody>';js.forEach(j=>{const lines=j.lines||[];const flagged=j.status==='flagged';lines.forEach((ln,idx)=>{html+='<tr'+(idx===0?' style="border-top:2px solid #d1d5db"':'')+(flagged?' style="background:#fef9c3"':'')+'>'+'<td class="mono">'+(idx===0?'<b>'+esc(j.id||'')+'</b>'+(j.ref?'<div style="font-size:9.5px;color:#71717a">'+esc(j.ref)+'</div>':''):'')+'</td>'+'<td>'+(idx===0?esc(j.date||''):'')+'</td>'+'<td class="mono">'+esc(ln.acc||'')+(ln.name?' <span style="color:#71717a">'+esc(ln.name)+'</span>':'')+'</td>'+'<td>'+(idx===0?esc(j.narrative||j.narration||'')+(j.note?'<div style="font-size:10px;color:#b45309;font-style:italic">⚠ '+esc(j.note)+'</div>':''):'')+'</td>'+'<td class="am">'+fmt(ln.dr||0)+'</td>'+'<td class="am">'+fmt(ln.cr||0)+'</td>'+'<td>'+(idx===0?(flagged?'<span class="sev HIGH" style="font-size:9.5px">FLAGGED</span>':esc(j.status||'posted')):'')+'</td>'+'</tr>'})});html+='</tbody>';tbl.innerHTML=html}
 else if(type==='invoices'){const r=await fetch(A+'/api/invoices');const d=await r.json();tbl.innerHTML='<thead><tr><th>Invoice</th><th>Client</th><th>Amount</th><th>PO</th><th>PO Amt</th><th>Status</th><th></th></tr></thead><tbody>'+d.invoices.map(i=>'<tr'+(i.status==='queried'?' style="background:#fff3cd"':'')+'><td>'+i.id+'</td><td>'+i.client+'</td><td class="am">£'+i.amount.toLocaleString('en-GB',{minimumFractionDigits:2})+'</td><td>'+(i.po||'')+'</td><td class="am">'+(i.po_amount?'£'+i.po_amount.toLocaleString('en-GB',{minimumFractionDigits:2}):'')+'</td><td>'+(i.status==='queried'?'⚠️ QUERIED':i.status)+'</td><td>'+(i.status==='queried'?'<button onclick="oivm(\''+i.id+'\')" style="background:#0078d4;color:#fff;border:0;padding:3px 8px;border-radius:3px;font-size:10px;cursor:pointer">Resolve</button>':'')+'</td></tr>').join('')+'</tbody>'}
 else if(type==='siem'){const r=await fetch(A+'/api/siem');const d=await r.json();renderSiem(d.alerts||[]);return}
-else if(type==='tickets'){const r=await fetch(A+'/api/jira');const d=await r.json();tbl.innerHTML='<thead><tr><th>ID</th><th>Type</th><th>Priority</th><th>Title</th><th>Assignee</th><th>Status</th><th>Source Alert</th><th></th></tr></thead><tbody>'+(d.tickets.length?d.tickets.map(t=>'<tr style="cursor:pointer" onclick="ojum(\''+t.id+'\')"><td><b>'+t.id+'</b></td><td>'+(t.type||'')+'</td><td><span class="sev '+(t.priority||'MEDIUM')+'">'+(t.priority||'')+'</span></td><td>'+t.title+'</td><td>'+(t.assignee||'')+'</td><td>'+t.status+'</td><td>'+(t.source_alert||'—')+'</td><td><button onclick="event.stopPropagation();ojum(\''+t.id+'\')" style="background:#0078d4;color:#fff;border:0;padding:3px 8px;border-radius:3px;font-size:10px;cursor:pointer">Update</button></td></tr>').join(''):'<tr><td colspan="8" style="text-align:center;color:#999;padding:20px">No incident tickets yet. Escalate a SIEM alert to auto-create one.</td></tr>')+'</tbody>'}
+else if(type==='tickets'){const r=await fetch(A+'/api/jira');const d=await r.json();tbl.innerHTML='<thead><tr><th>ID</th><th>Type</th><th>Priority</th><th>Title</th><th>Assignee</th><th>Status</th><th>Source Alert</th><th></th></tr></thead><tbody>'+(d.tickets.length?d.tickets.map(t=>'<tr style="cursor:pointer" onclick="ojum(\''+t.id+'\')"><td><b>'+t.id+'</b></td><td>'+(t.type||'')+'</td><td><span class="sev '+(t.priority||'MEDIUM')+'">'+(t.priority||'')+'</span></td><td>'+t.title+'</td><td>'+(t.assignee||'')+'</td><td>'+t.status+'</td><td>'+(t.source_alert||'—')+'</td><td><button onclick="event.stopPropagation();ojum(\''+t.id+'\')" style="background:#0078d4;color:#fff;border:0;padding:3px 8px;border-radius:3px;font-size:10px;cursor:pointer">Update</button></td></tr>').join(''):'<tr><td colspan="8" style="text-align:center;color:#999;padding:20px">No cases yet — escalating an alert from the queue opens a case.</td></tr>')+'</tbody>'}
 else if(type==='jira'){const r=await fetch(A+'/api/jira');const d=await r.json();_jiraTickets=d.tickets||[];renderJira(_jiraTickets)}
 else if(type==='campaigns'){const r=await fetch(A+'/api/campaigns');const d=await r.json();_campaigns=d.campaigns||[];renderCampaigns(_campaigns)}
 else if(type==='abtests'){const r=await fetch(A+'/api/campaigns');const d=await r.json();_campaigns=d.campaigns||[];renderAbTests(_campaigns)}
@@ -2292,7 +2292,7 @@ function renderSiem(alerts){
       +'<td>'+status+(a.linked_ticket?'<div style="font-size:10px;color:#0078d4;font-weight:600">'+esc(a.linked_ticket)+'</div>':'')+'</td>'
       +'</tr>';
   }).join('');
-  body.innerHTML='<div class="siem-summary" id="siemSummary">'+_siemSummaryHTML(alerts)+_siemSparkline(alerts)+'</div>'
+  body.innerHTML='<div class="siem-summary" id="siemSummary"><b style="font-size:10.5px;letter-spacing:0.07em;text-transform:uppercase;opacity:0.65;margin-right:6px">Alert Queue — Tier 1</b>'+_siemSummaryHTML(alerts)+_siemSparkline(alerts)+'</div>'
     +'<div style="overflow:auto;max-height:calc(100% - 40px)"><table class="siem-tbl" id="toolTable"><thead><tr>'
     +'<th>ID</th><th>'+_bgTip('alerts','TIME','Time')+'</th><th>'+_bgTip('alerts','SEV','Sev')+'</th><th>Conf</th><th>'+_bgTip('alerts','SOURCE','Source')+'</th><th>'+_bgTip('alerts','TITLE','Title')+'</th><th>Src → Dst</th><th>Asset</th><th>MITRE</th><th>SLA</th><th>'+_bgTip('alerts','STATUS','Status')+'</th>'
     +'</tr></thead><tbody>'+(rows||'<tr><td colspan="11" style="text-align:center;color:#999;padding:20px">No alerts</td></tr>')+'</tbody></table></div>';
@@ -2312,7 +2312,7 @@ function _siemTimelineHTML(a){
   });
   if(a.analyst_notes){events.push({ts:'',cls:'note',title:'Analyst note recorded',body:esc(a.analyst_notes)})}
   if(a.status&&a.status!=='open'){
-    const map={escalate:'⚠ Escalated as real threat',resolve:'✓ Resolved as false positive',investigate:'⌕ Marked for further investigation'};
+    const map={escalate:'⚠ Escalated to Tier 2 — verdict: True Positive',resolve:'✓ Closed — verdict: False Positive',investigate:'⌕ Ownership taken — investigation in progress'};
     events.push({ts:a.triaged_at||'',cls:'triage',title:map[a.status]||('Triaged: '+esc(a.status)),body:a.linked_ticket?'Linked ticket: '+esc(a.linked_ticket):''});
   }
   events.sort((x,y)=>(x.ts||'').localeCompare(y.ts||''));
@@ -2330,7 +2330,8 @@ function osd(id){
   const isResolved=a.status&&a.status!=='open';
   const fp=a.false_positive_indicators?('<div class="sd-section"><h4>False Positive Indicators</h4><div class="sd-fp">'+esc(a.false_positive_indicators)+'</div></div>'):'';
   const related=(a.related_alerts||[]).length?('<div class="sd-section"><h4>Related Alerts</h4><div class="sd-related">'+(a.related_alerts||[]).map(rid=>'<a onclick="osd(\''+esc(rid)+'\')">'+esc(rid)+' →</a>').join('')+'</div></div>'):'';
-  const banner=isResolved?('<div class="sd-banner '+(a.status==='resolve'?'ok':'bad')+'">Already triaged: <b>'+esc(a.status)+'</b></div>'):'';
+  const _stWord={escalate:'Escalated to Tier 2 (True Positive)',resolve:'Closed — False Positive',investigate:'Under investigation (ownership taken)'};
+  const banner=isResolved?('<div class="sd-banner '+(a.status==='resolve'?'ok':'bad')+'">Already triaged: <b>'+esc(_stWord[a.status]||a.status)+'</b></div>'):'';
   // Tab 1 — Details. SOC-grade card: field grid + MITRE tags + trigger callout.
   // Every field falls back to the legacy name so pre-enrichment alerts render.
   const stLbl=a.status_label||(isResolved?'Closed':'New');
@@ -2359,7 +2360,7 @@ function osd(id){
     +fld('Device Action',da?'<span class="sd-vpill da-'+da.toLowerCase()+'">'+esc(da)+'</span>':'—')
     +fld('Verdict','<span class="sd-vpill '+vdCls+'">'+esc(vd||'Not set')+'</span>')
     +fld('Confidence','<span class="conf-bar"><i style="width:'+conf+'%"></i></span> '+conf+'/100')
-    +fld('IP Reputation',esc(a.ip_reputation||a.dst_reputation||'No threat intel match'),false,true)
+    +fld('Threat Intel — IP Reputation',esc(a.ip_reputation||a.dst_reputation||'No threat intel match'),false,true)
     +(a.affected_asset?fld('Affected Asset',esc(a.affected_asset),false,true):'')
     +'</div>'
     +(trigger?'<div class="sd-trigger"><div class="k">⚡ Why this fired</div><div class="v">'+esc(trigger)+'</div></div>':'')
@@ -2392,9 +2393,9 @@ function osd(id){
     +'<div class="sd-tab-pane" data-pane="playbook">'+pbPane+'</div>'
     +'<div class="sd-tab-pane" data-pane="timeline">'+tlPane+'</div>'
     +(isResolved?'':'<div class="sd-actions">'
-      +'<button class="sd-act escalate" onclick="_doTriage(\''+esc(a.id)+'\',\'escalate\')">⚠ Escalate</button>'
-      +'<button class="sd-act resolve" onclick="_doTriage(\''+esc(a.id)+'\',\'resolve\')">✓ Resolve (FP)</button>'
-      +'<button class="sd-act invest" onclick="_doTriage(\''+esc(a.id)+'\',\'investigate\')">⌕ Investigate</button>'
+      +'<button class="sd-act invest" onclick="_doTriage(\''+esc(a.id)+'\',\'investigate\')">⌕ Take Ownership</button>'
+      +'<button class="sd-act escalate" onclick="_doTriage(\''+esc(a.id)+'\',\'escalate\')">⚠ Escalate to Tier 2</button>'
+      +'<button class="sd-act resolve" onclick="_doTriage(\''+esc(a.id)+'\',\'resolve\')">✓ Close — False Positive</button>'
       +'</div>')
     +'<div class="sd-section"><h4>Analyst Notes</h4><div class="sd-note"><textarea id="sdNote" placeholder="What did you find / why this action?">'+esc(a.analyst_notes||'')+'</textarea><button onclick="_saveNote(\''+esc(a.id)+'\')">Save</button></div></div>';
   const sd=document.getElementById('sd');
