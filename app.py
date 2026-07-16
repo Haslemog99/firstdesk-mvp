@@ -4220,6 +4220,13 @@ async def api_next_day():
 class SiemTriageReq(BaseModel):
     action: str = Field(..., pattern=r"^(escalate|resolve|investigate)$")
     note: SafeStr = Field("", max_length=2000)
+    # Documented-close fields (SOC realism): closing/escalating requires a verdict.
+    verdict: Optional[str] = Field(None, pattern=r"^(True Positive|False Positive|Benign True Positive)$")
+    rationale: SafeStr = Field("", max_length=2000)
+    iocs: SafeStr = Field("", max_length=1000)
+
+# Severity-based ownership SLA targets (minutes) — Tier-1 MTTR expectations.
+_SIEM_MTTR_TARGET_MIN = {"CRITICAL": 15, "HIGH": 30, "MEDIUM": 120, "LOW": 240}
 
 @app.post("/api/siem/{alert_id}/triage")
 async def api_siem_triage(alert_id: str, body: SiemTriageReq):
@@ -4227,10 +4234,38 @@ async def api_siem_triage(alert_id: str, body: SiemTriageReq):
     if not alert:
         raise HTTPException(404, "Alert not found")
     action = body.action
-    siem_col.update_one(
-        {"id": alert_id, "simulation_id": sim_id()},
-        {"$set": {"status": action, "triage_status": "reviewed"}},
-    )
+    now_iso = datetime.utcnow().isoformat() + "Z"
+
+    # ── Take Ownership: stamp owned_at, keep the alert open for a final verdict ──
+    if action == "investigate":
+        upd = {"triage_status": "investigating"}
+        if not alert.get("owned_at"):
+            upd["owned_at"] = now_iso
+        siem_col.update_one({"id": alert_id, "simulation_id": sim_id()}, {"$set": upd})
+    else:
+        # ── Documented close: escalate/resolve require verdict + rationale ──
+        rationale = (body.rationale or body.note or "").strip()
+        if len(rationale) < 20:
+            raise HTTPException(400, detail={
+                "error": "verdict_required",
+                "message": "Closing an alert requires a documented verdict: rationale of at least 20 characters.",
+            })
+        verdict = body.verdict or ("True Positive" if action == "escalate" else "False Positive")
+        ioc_list = [s.strip() for s in re.split(r"[,\n;]+", body.iocs or "") if s.strip()][:20]
+        upd = {
+            "status": action, "triage_status": "reviewed",
+            "verdict": verdict, "verdict_rationale": rationale,
+            "verdict_iocs": ioc_list, "triaged_at": now_iso,
+        }
+        if not alert.get("owned_at"):
+            upd["owned_at"] = now_iso  # closed without explicit ownership — implied
+        else:
+            try:
+                owned = datetime.fromisoformat(str(alert["owned_at"]).replace("Z", ""))
+                upd["mttr_sec"] = max(0, int((datetime.utcnow() - owned).total_seconds()))
+            except Exception:
+                pass
+        siem_col.update_one({"id": alert_id, "simulation_id": sim_id()}, {"$set": upd})
     if body.note:
         siem_col.update_one(
             {"id": alert_id, "simulation_id": sim_id()},
@@ -4259,11 +4294,20 @@ async def api_siem_triage(alert_id: str, body: SiemTriageReq):
             pts = -5
             expected = correct_action or ("escalate" if is_real else "resolve")
             msg = f"Incorrect — expected {expected}, you chose {action}. (-5 pts)"
-    evals_col.insert_one({
+    # Idempotence guard: ownership can be re-clicked; score it only once per action.
+    already_scored = evals_col.find_one({
         "simulation_id": sim_id(), "type": "alert_triage",
         "alert_id": alert_id, "action": action,
-        "correct": correct, "points": pts,
     })
+    if already_scored:
+        pts = 0
+        msg = "Already recorded for this action — no points change."
+    else:
+        evals_col.insert_one({
+            "simulation_id": sim_id(), "type": "alert_triage",
+            "alert_id": alert_id, "action": action,
+            "correct": correct, "points": pts,
+        })
     # ── Bonus point logic ─────────────────────────────────────────
     bonuses: list[str] = []
     bonus_total = 0
@@ -4290,7 +4334,7 @@ async def api_siem_triage(alert_id: str, body: SiemTriageReq):
                 bonuses.append(f"+10 correlation bonus ({alert_id} ↔ {rid})")
         # Travel-check bonus on the unusual-location alert
         if alert_id == "ALERT-2026-0218-006" and action == "resolve":
-            note_blob = (body.note or "").lower()
+            note_blob = ((body.note or "") + " " + (body.rationale or "")).lower()
             if any(k in note_blob for k in ("travel", "tr-2026", "leave", "trip", "approved")):
                 already = evals_col.find_one({
                     "simulation_id": sim_id(), "type": "travel_check_bonus", "alert_id": alert_id,
@@ -4302,8 +4346,8 @@ async def api_siem_triage(alert_id: str, body: SiemTriageReq):
                     })
                     bonus_total += 5
                     bonuses.append("+5 verified travel record before resolving")
-    # Per-note bonus on the same call when a substantive note is attached
-    if body.note and len(body.note.strip()) >= 20:
+    # Per-note bonus on the same call when a substantive note/rationale is attached
+    if len(((body.note or "") + (body.rationale or "")).strip()) >= 20:
         already_note = evals_col.find_one({
             "simulation_id": sim_id(), "type": "note_bonus", "alert_id": alert_id,
         })
@@ -4317,7 +4361,42 @@ async def api_siem_triage(alert_id: str, body: SiemTriageReq):
     if bonus_total:
         msg = msg + " · " + " · ".join(bonuses)
     emit("alert_triaged", {"alert": alert, "action": action, "correct": correct, "points": pts + bonus_total})
-    return {"ok": True, "correct": correct, "points": pts + bonus_total, "base_points": pts, "bonus_points": bonus_total, "bonuses": bonuses, "message": msg, "expected": correct_action}
+
+    # ── Workplace-physics cascade (Slack/Jira/manager email) ──
+    # Fired server-side so correctness can't be spoofed from the client.
+    # performance_note triggers are skipped — this endpoint's own scoring
+    # already awarded the points. Ambiguous alerts (is_real None) skip physics.
+    physics_effects: list[dict] = []
+    if action in ("escalate", "resolve") and alert.get("is_real_threat") is not None and not already_scored:
+        key = ("siem.escalate_alert_" + ("correct" if is_real else "wrong")) if action == "escalate" \
+              else ("siem.resolve_alert_" + ("wrong" if is_real else "correct"))
+        try:
+            sess = sessions_col.find_one({"session_id": session_id()}, {"_id": 0}) or {}
+            cfg = CAREER_CONFIGS.get(get_career() or "cybersecurity", CAREER_CONFIGS["cybersecurity"])
+            engine = WorkplacePhysicsEngine(
+                emails_col=emails_col, tasks_col=tasks_col, tools_col=tools_col,
+                slack_col=slack_col, evals_col=evals_col, jira_col=jira_col,
+                sessions_col=sessions_col, career_config=cfg,
+                sim_id=sim_id(), session_id=session_id(),
+                user_id=sess.get("user_id") or "anon",
+                user_name=sess.get("user_name") or sess.get("name") or "you",
+            )
+            physics_effects = engine.process(key, {
+                "alert_id": alert.get("alert_id") or alert_id,
+                "alert_title": alert.get("title") or "",
+                "alert_severity": (alert.get("severity") or "").upper(),
+                "analyst_notes": (body.rationale or body.note or "")[:300],
+                "false_positive_reason": alert.get("false_positive_indicators") or "known benign pattern",
+                "user_name": sess.get("user_name") or sess.get("name") or "the analyst",
+            }, skip_types={"performance_note"})
+        except Exception as ex:
+            log.warning("siem.physics.fail key=%s err=%s", key, ex)
+
+    sev_target = _SIEM_MTTR_TARGET_MIN.get(sev, 240)
+    return {"ok": True, "correct": correct, "points": pts + bonus_total, "base_points": pts,
+            "bonus_points": bonus_total, "bonuses": bonuses, "message": msg, "expected": correct_action,
+            "effects": physics_effects, "owned_at": alert.get("owned_at") or upd.get("owned_at"),
+            "mttr_target_min": sev_target}
 
 class SiemNoteReq(BaseModel):
     note: SafeStr = Field(..., max_length=2000)

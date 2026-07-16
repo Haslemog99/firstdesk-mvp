@@ -561,6 +561,15 @@ button{cursor:pointer}
 .sd-vpill.vd-null{background:#f1f5f9;color:#94a3b8}
 .sd-vpill.vd-tp{background:#fee2e2;color:#991b1b}
 .sd-vpill.vd-fp{background:#dcfce7;color:#166534}
+.sd-verdict{background:#f8fafc;border:0.5px solid rgba(0,0,0,0.08);border-radius:10px;padding:12px;margin-top:10px}
+.sd-verdict h4{margin:0 0 8px;font-size:11px;text-transform:uppercase;letter-spacing:0.06em;color:#475569}
+.sd-vrow{display:grid;grid-template-columns:86px 1fr;gap:8px;align-items:start;margin-bottom:8px}
+.sd-vrow label{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.05em;color:#71717a;padding-top:7px}
+.sd-vrow select,.sd-vrow input,.sd-vrow textarea{width:100%;border:0.5px solid rgba(0,0,0,0.14);border-radius:7px;padding:7px 9px;font-size:12px;font-family:var(--ff);background:#fff}
+.sd-vrow textarea{min-height:56px;resize:vertical;line-height:1.45}
+.sd-vbtns{display:flex;gap:8px;justify-content:flex-end;margin-top:2px}
+.sd-vbtns .ss{background:#0078d4;color:#fff;border:0;padding:7px 14px;border-radius:7px;font-size:12px;font-weight:600;cursor:pointer}
+.sd-vbtns .cc{background:#f1f5f9;color:#334155;border:0;padding:7px 12px;border-radius:7px;font-size:12px;cursor:pointer}
 .sd-section{margin-top:12px}
 .sd-section h4{font-size:11px;text-transform:uppercase;letter-spacing:0.06em;color:#52525b;margin:0 0 6px;font-weight:700}
 .sd-log{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:10.5px;background:#0f172a;color:#94e2d5;padding:10px;border-radius:6px;white-space:pre-wrap;word-break:break-all;line-height:1.45;max-height:140px;overflow:auto}
@@ -2273,7 +2282,7 @@ function renderSiem(alerts){
   const rows=alerts.map(a=>{
     const sev=(a.severity||'LOW').toUpperCase();
     const sla=_siemSlaInfo(a);
-    const status=(a.status||'open').toUpperCase();
+    const status=(a.status&&a.status!=='open')?(a.status==='resolve'?'CLOSED (FP)':a.status==='escalate'?'ESCALATED':'IN PROGRESS'):(a.owned_at?'IN PROGRESS':'NEW');
     const resCls=(a.status&&a.status!=='open')?' row-resolved':'';
     const conf=Math.max(0,Math.min(100,Number(a.confidence||0)));
     const mitre=a.mitre_technique?('<span class="mitre-pill" title="'+esc(a.mitre_name||'')+'">'+esc(a.mitre_technique)+'</span>'):'—';
@@ -2334,7 +2343,7 @@ function osd(id){
   const banner=isResolved?('<div class="sd-banner '+(a.status==='resolve'?'ok':'bad')+'">Already triaged: <b>'+esc(_stWord[a.status]||a.status)+'</b></div>'):'';
   // Tab 1 — Details. SOC-grade card: field grid + MITRE tags + trigger callout.
   // Every field falls back to the legacy name so pre-enrichment alerts render.
-  const stLbl=a.status_label||(isResolved?'Closed':'New');
+  const stLbl=isResolved?'Closed':(a.owned_at?'In Progress':'New');
   const stCls=stLbl==='Closed'?'st-closed':(stLbl==='In Progress'?'st-inprog':'st-new');
   const vd=a.verdict||null;
   const vdCls=vd==='True Positive'?'vd-tp':(vd?'vd-fp':'vd-null');
@@ -2364,6 +2373,7 @@ function osd(id){
     +(a.affected_asset?fld('Affected Asset',esc(a.affected_asset),false,true):'')
     +'</div>'
     +(trigger?'<div class="sd-trigger"><div class="k">⚡ Why this fired</div><div class="v">'+esc(trigger)+'</div></div>':'')
+    +(a.verdict_rationale?'<div class="sd-section"><h4>Analyst Verdict — '+esc(a.verdict||'')+'</h4><div class="sd-fp">'+esc(a.verdict_rationale)+((a.verdict_iocs||[]).length?'<div class="mitre-tags" style="margin-top:6px">'+(a.verdict_iocs||[]).map(x=>'<span class="mitre-pill">'+esc(x)+'</span>').join('')+'</div>':'')+'</div></div>':'')
     +(desc?'<div class="sd-row" style="margin-top:8px"><div class="k">Description</div><div class="v">'+esc(desc)+'</div></div>':'')
     +mitreTags
     +related+fp;
@@ -2381,7 +2391,7 @@ function osd(id){
       +'<span class="sd-vpill '+stCls+'">'+esc(stLbl)+'</span>'
       +'<span class="src-pill">'+esc(a.log_source||((a.source||'')+(a.source_detail?' · '+a.source_detail:'')))+'</span>'
       +'<span class="sla-pill '+sla.cls+'">'+sla.label+'</span></div>'
-    +'<div class="sd-subhead"><span>'+esc(a.alert_id||a.id)+'</span>'+(a.detection_time?'<span>detected '+esc(a.detection_time)+'</span>':'')+(a.title&&a.rule_name&&a.title!==a.rule_name?'<span>'+esc(a.title)+'</span>':'')+'</div>'
+    +'<div class="sd-subhead"><span>'+esc(a.alert_id||a.id)+'</span>'+(a.detection_time?'<span>detected '+esc(a.detection_time)+'</span>':'')+(a.title&&a.rule_name&&a.title!==a.rule_name?'<span>'+esc(a.title)+'</span>':'')+(a.owned_at&&!isResolved?'<span class="sd-vpill st-inprog" id="sdMttr">⏱ …</span>':'')+'</div>'
     +'<div class="sd-tabs">'
       +'<div class="sd-tab on" onclick="_sdTab(this,\'details\')">Details</div>'
       +'<div class="sd-tab" onclick="_sdTab(this,\'log\')">Raw Log</div>'
@@ -2393,20 +2403,61 @@ function osd(id){
     +'<div class="sd-tab-pane" data-pane="playbook">'+pbPane+'</div>'
     +'<div class="sd-tab-pane" data-pane="timeline">'+tlPane+'</div>'
     +(isResolved?'':'<div class="sd-actions">'
-      +'<button class="sd-act invest" onclick="_doTriage(\''+esc(a.id)+'\',\'investigate\')">⌕ Take Ownership</button>'
-      +'<button class="sd-act escalate" onclick="_doTriage(\''+esc(a.id)+'\',\'escalate\')">⚠ Escalate to Tier 2</button>'
-      +'<button class="sd-act resolve" onclick="_doTriage(\''+esc(a.id)+'\',\'resolve\')">✓ Close — False Positive</button>'
+      +(a.owned_at?'':'<button class="sd-act invest" onclick="_doTriage(\''+esc(a.id)+'\',\'investigate\')">⌕ Take Ownership</button>')
+      +'<button class="sd-act escalate" onclick="_showVerdict(\''+esc(a.id)+'\',\'escalate\')">⚠ Escalate to Tier 2</button>'
+      +'<button class="sd-act resolve" onclick="_showVerdict(\''+esc(a.id)+'\',\'resolve\')">✓ Close — False Positive</button>'
+      +'</div>'
+      +'<div id="sdVerdictPanel" class="sd-section sd-verdict" style="display:none">'
+        +'<h4>Documented Verdict</h4>'
+        +'<div class="sd-vrow"><label>Verdict</label><select id="sdVerdict"><option>True Positive</option><option>False Positive</option><option>Benign True Positive</option></select></div>'
+        +'<div class="sd-vrow"><label>Rationale</label><textarea id="sdRationale" placeholder="Required — what evidence supports this verdict? (min 20 chars)"></textarea></div>'
+        +'<div class="sd-vrow"><label>IOCs</label><input id="sdIocs" placeholder="Comma-separated — IPs, hashes, domains observed (defanged)"></div>'
+        +'<div class="sd-vbtns"><button class="cc" onclick="document.getElementById(\'sdVerdictPanel\').style.display=\'none\'">Cancel</button><button class="ss" id="sdVerdictGo" onclick="_doTriage(\''+esc(a.id)+'\',document.getElementById(\'sdVerdictPanel\').dataset.action)">Confirm</button></div>'
       +'</div>')
     +'<div class="sd-section"><h4>Analyst Notes</h4><div class="sd-note"><textarea id="sdNote" placeholder="What did you find / why this action?">'+esc(a.analyst_notes||'')+'</textarea><button onclick="_saveNote(\''+esc(a.id)+'\')">Save</button></div></div>';
   const sd=document.getElementById('sd');
   sd.classList.add('on');sd.classList.add('siem-dark-modal');openModalA11y('sd');
+  if(window._sdMttrTimer){clearInterval(window._sdMttrTimer);window._sdMttrTimer=null}
+  if(a.owned_at&&!isResolved){_mttrTick(a.owned_at,sev);window._sdMttrTimer=setInterval(()=>_mttrTick(a.owned_at,sev),1000)}
 }
-function csd(){const sd=document.getElementById('sd');sd.classList.remove('on');sd.classList.remove('siem-dark-modal');closeModalA11y('sd');document.querySelectorAll('.alert-row').forEach(r=>r.classList.remove('related-hit'))}
+function csd(){const sd=document.getElementById('sd');sd.classList.remove('on');sd.classList.remove('siem-dark-modal');closeModalA11y('sd');document.querySelectorAll('.alert-row').forEach(r=>r.classList.remove('related-hit'));if(window._sdMttrTimer){clearInterval(window._sdMttrTimer);window._sdMttrTimer=null}}
+// MTTR targets per severity (minutes) — mirrors backend _SIEM_MTTR_TARGET_MIN.
+const _MTTR_TARGET={CRITICAL:15,HIGH:30,MEDIUM:120,LOW:240};
+function _mttrTick(ownedAt,sev){
+  const el=document.getElementById('sdMttr');if(!el)return;
+  const t=_MTTR_TARGET[(sev||'LOW').toUpperCase()]||240;
+  const elapsed=Math.max(0,(Date.now()-Date.parse(ownedAt))/1000);
+  const mm=Math.floor(elapsed/60),ss=Math.floor(elapsed%60);
+  const over=elapsed>t*60;
+  el.textContent='⏱ MTTR '+mm+':'+String(ss).padStart(2,'0')+' / target '+t+'m';
+  el.className='sd-vpill '+(over?'vd-tp':'st-inprog');
+  el.title=over?'Over the Tier-1 target for this severity':'Time since you took ownership vs the Tier-1 target';
+}
+function _showVerdict(id,action){
+  const p=document.getElementById('sdVerdictPanel');if(!p)return;
+  p.style.display='block';p.dataset.action=action;
+  const sel=document.getElementById('sdVerdict');
+  if(sel)sel.value=action==='escalate'?'True Positive':'False Positive';
+  const cb=document.getElementById('sdVerdictGo');
+  if(cb)cb.textContent=action==='escalate'?'⚠ Confirm — Escalate to Tier 2':'✓ Confirm — Close Alert';
+  const ra=document.getElementById('sdRationale');if(ra)ra.focus();
+}
 async function _doTriage(id,action){
   const note=document.getElementById('sdNote')?document.getElementById('sdNote').value:'';
+  const body={action,note};
+  if(action!=='investigate'){
+    const v=document.getElementById('sdVerdict'),r=document.getElementById('sdRationale'),i=document.getElementById('sdIocs');
+    body.verdict=v?v.value:null;
+    body.rationale=r?r.value.trim():'';
+    body.iocs=i?i.value.trim():'';
+    if(body.rationale.length<20){toast('Documented verdict required — rationale of at least 20 characters.','error');if(r)r.focus();return}
+  }
   try{
-    const d=await api.post('/api/siem/'+id+'/triage',{action,note});
+    const d=await api.post('/api/siem/'+id+'/triage',body);
     toast(d.message||'Triage submitted',d.correct?'success':'error');
+    (d.effects||[]).forEach((ef,ix)=>setTimeout(()=>showPhysicsToast(ef),400+ix*700));
+    if(d.effects&&d.effects.length&&typeof _refreshAfterPhysics==='function')_refreshAfterPhysics(d.effects);
+    if(action==='investigate'){const ca=_siemAlerts.find(x=>x.id===id);if(ca&&!ca.owned_at)ca.owned_at=d.owned_at||new Date().toISOString();osd(id);if(ct==='siem')loadTool('siem');uc();return}
     csd();
     if(ct==='siem')loadTool('siem');
     uc();li();

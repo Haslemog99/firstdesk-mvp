@@ -244,8 +244,10 @@ class WorkplacePhysicsEngine:
         self.user_id = user_id
         self.user_name = user_name
 
-    def process(self, action_key: str, context: dict) -> list[dict]:
-        """Entry point. Returns the list of effects actually fired."""
+    def process(self, action_key: str, context: dict, skip_types: Optional[set] = None) -> list[dict]:
+        """Entry point. Returns the list of effects actually fired.
+        skip_types: trigger types to suppress (e.g. {'performance_note'} when the
+        caller's own scoring pipeline already awards points for this action)."""
         rules = WORKPLACE_PHYSICS.get(action_key)
         if not rules:
             return []
@@ -257,6 +259,8 @@ class WorkplacePhysicsEngine:
         ctx = {"user_name": self.user_name, **(context or {})}
         effects = []
         for trigger in rules.get("triggers", []):
+            if skip_types and trigger.get("type") in skip_types:
+                continue
             cond = trigger.get("condition")
             if cond and not self._eval_condition(cond, ctx):
                 continue
