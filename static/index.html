@@ -711,21 +711,52 @@ button{cursor:pointer}
 .edr-actions{margin-top:14px}
 /* ── EDR standalone console (Endpoints tab) ── */
 .edr-console{padding:12px 14px;height:100%;overflow:auto;background:#0f1424}
-.edr-console-bar{display:flex;align-items:baseline;gap:10px;margin-bottom:12px;color:#f1f5f9}
+.edr-console-bar{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:12px;color:#f1f5f9;position:sticky;top:-12px;background:#0f1424;padding:4px 0 8px;z-index:2;border-bottom:0.5px solid rgba(255,255,255,0.06)}
 .edr-console-bar b{font-size:13px;letter-spacing:-0.01em}
-.edr-console-bar span{font-size:11px;color:#94a3b8}
-.edr-host-card{border:0.5px solid rgba(255,255,255,0.10);border-radius:10px;margin-bottom:12px;overflow:hidden;background:rgba(255,255,255,0.02)}
-.edr-host-head{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:10px 12px;background:rgba(255,255,255,0.03);border-bottom:0.5px solid rgba(255,255,255,0.08)}
+.edr-legend{display:inline-flex;align-items:center;gap:5px;font-size:11px;color:#cbd5e1}
+.edr-sub{font-size:11px;color:#94a3b8}
+.edr-xall{background:rgba(255,255,255,0.06);color:#cbd5e1;border:0.5px solid rgba(255,255,255,0.12);border-radius:6px;padding:4px 9px;font-size:10.5px;cursor:pointer;font-family:var(--ff)}
+.edr-xall:hover{background:rgba(255,255,255,0.12)}
+.edr-xall:last-of-type{margin-right:0}
+.edr-xall:nth-of-type(1){margin-left:auto}
+/* traffic-light dot */
+.edr-tl{width:9px;height:9px;border-radius:50%;flex:0 0 auto;display:inline-block}
+.edr-tl.red{background:#ef4444;box-shadow:0 0 0 3px rgba(239,68,68,0.20)}
+.edr-tl.amber{background:#f59e0b;box-shadow:0 0 0 3px rgba(245,158,11,0.20)}
+.edr-tl.green{background:#22c55e;box-shadow:0 0 0 3px rgba(34,197,94,0.18)}
+.edr-host-card{border:0.5px solid rgba(255,255,255,0.10);border-left-width:3px;border-radius:10px;margin-bottom:10px;overflow:hidden;background:rgba(255,255,255,0.02)}
+.edr-host-card.rail-red{border-left-color:#ef4444}
+.edr-host-card.rail-amber{border-left-color:#f59e0b}
+.edr-host-card.rail-green{border-left-color:#22c55e}
+.edr-host-head{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:10px 12px;background:rgba(255,255,255,0.03);cursor:pointer;transition:background .12s}
+.edr-host-head:hover{background:rgba(255,255,255,0.06)}
 .edr-host-name{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:13px;font-weight:700;color:#f1f5f9}
+.edr-health{font-size:9.5px;font-weight:700;text-transform:uppercase;letter-spacing:0.04em;padding:2px 7px;border-radius:5px}
+.edr-health.red{background:rgba(239,68,68,0.20);color:#fca5a5}
+.edr-health.amber{background:rgba(245,158,11,0.22);color:#fcd34d}
+.edr-health.green{background:rgba(34,197,94,0.20);color:#86efac}
 .edr-host-user{font-size:11px;color:#7dd3fc}
+.edr-host-count{font-size:10px;color:#94a3b8;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
 .edr-iso-btn{margin-left:auto;background:rgba(220,38,38,0.20);color:#fca5a5;border:0.5px solid rgba(220,38,38,0.4);border-radius:7px;padding:5px 11px;font-size:11px;font-weight:600;cursor:pointer;font-family:var(--ff)}
 .edr-iso-btn:hover{background:rgba(220,38,38,0.30)}
-.edr-det{border-top:0.5px solid rgba(255,255,255,0.05)}
-.edr-det-head{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:8px 12px;cursor:pointer;transition:background .12s}
+.edr-host-head .sd-vpill{margin-left:auto}
+.edr-chev{font-size:10px;color:#94a3b8;transition:transform .15s;display:inline-block;width:10px}
+.edr-host-card.collapsed .edr-host-head>.edr-chev{transform:rotate(-90deg)}
+.edr-host-body{max-height:4000px;overflow:hidden;transition:max-height .25s var(--ease-out)}
+.edr-host-card.collapsed .edr-host-body{max-height:0}
+.edr-det{border-top:0.5px solid rgba(255,255,255,0.06)}
+.edr-det-head{display:flex;align-items:center;gap:8px;padding:8px 12px;cursor:pointer;transition:background .12s;min-width:0}
 .edr-det-head:hover{background:rgba(99,102,241,0.10)}
-.edr-det-title{font-size:12px;font-weight:600;color:#e2e8f0}
-.edr-det-meta{font-size:10px;color:#94a3b8;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
-.edr-det-body{padding:0 12px 10px}
+.edr-det .edr-chev{transition:transform .15s}
+.edr-det:not(.collapsed) .edr-det-head>.edr-chev{transform:rotate(90deg)}
+.edr-det-title{font-size:12px;font-weight:600;color:#e2e8f0;flex:0 0 auto}
+.edr-det-chain{font-size:10.5px;color:#94a3b8;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.edr-det.collapsed .edr-det-chain{color:#cbd5e1}
+.edr-open{font-size:10px;color:#a5b4fc;cursor:pointer;flex:0 0 auto;padding:2px 6px;border-radius:5px;background:rgba(99,102,241,0.14)}
+.edr-open:hover{background:rgba(99,102,241,0.26)}
+.edr-det-meta{font-size:10px;color:#94a3b8;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;padding:2px 0 8px}
+.edr-det-body{padding:0 12px 10px;max-height:3000px;overflow:hidden;transition:max-height .25s var(--ease-out)}
+.edr-det.collapsed .edr-det-body{max-height:0;padding-top:0;padding-bottom:0}
 .edr-mini-tbl{margin-top:8px;border:0.5px solid rgba(255,255,255,0.08);border-radius:8px;overflow-x:auto}
 .sd-tabs{display:flex;gap:2px;border-bottom:0.5px solid rgba(0,0,0,0.10);margin:10px 0 12px}
 .sd-tab{font-size:11.5px;font-weight:600;padding:7px 14px;color:#6b7280;cursor:pointer;border-bottom:2px solid transparent;letter-spacing:0.02em;text-transform:uppercase;user-select:none;transition:color .12s}
@@ -2429,36 +2460,76 @@ function _edrProcTreeHTML(t){
   if(fe.length)html+='<div class="edr-mini-tbl"><table class="edr-tbl"><thead><tr><th>Time</th><th>Action</th><th>Path</th><th>Process</th></tr></thead><tbody>'+fe.map(e=>'<tr><td class="mono">'+esc((e.ts||'').slice(11,19))+'</td><td><span class="edr-fa '+esc(e.action||'')+'">'+esc(e.action||'')+'</span></td><td class="mono">'+esc(e.path||'')+'</td><td class="mono">'+esc(e.process||'')+'</td></tr>').join('')+'</tbody></table></div>';
   return html;
 }
+// Traffic-light health for a host — changes as the analyst triages/contains.
+function _edrHealth(h){
+  if(h.host_status==='contained')return{lvl:'green',txt:'Contained'};
+  const open=h.detections.filter(d=>(d.status||'open')==='open');
+  const critHigh=h.detections.some(d=>['CRITICAL','HIGH'].indexOf((d.severity||'').toUpperCase())>=0);
+  if(open.length&&critHigh)return{lvl:'red',txt:'Active Threat'};
+  if(open.length)return{lvl:'amber',txt:'Needs Review'};
+  return{lvl:'green',txt:'Triaged'};
+}
+// One-line malicious process chain for the collapsed detection summary.
+function _edrChain(t){
+  const names=[];(t.process_tree||[]).forEach(p=>{if(p.malicious&&names[names.length-1]!==p.name)names.push(p.name)});
+  return names.slice(0,5).join(' → ')+(names.length>5?' → …':'');
+}
 function renderEdr(hosts){
   const tp=document.querySelector('#w-tool .tp');if(tp)tp.classList.add('siem-dark');
   const body=document.querySelector('#w-tool .tp-body');if(!body)return;
   if(!hosts.length){body.innerHTML='<div class="edr-console"><div class="sd-empty" style="margin-top:40px">No endpoints under investigation. Endpoint telemetry appears here when a signal alert involves a host with EDR/XDR coverage.</div></div>';return}
   const totDet=hosts.reduce((n,h)=>n+h.detections.length,0);
-  let html='<div class="edr-console"><div class="edr-console-bar"><b>Endpoint Detection &amp; Response</b><span>'+hosts.length+' host'+(hosts.length===1?'':'s')+' · '+totDet+' detection'+(totDet===1?'':'s')+'</span></div>';
-  hosts.forEach(h=>{
+  const health=hosts.map(_edrHealth);
+  const cnt={red:0,amber:0,green:0};health.forEach(x=>cnt[x.lvl]++);
+  let html='<div class="edr-console"><div class="edr-console-bar">'
+    +'<b>Endpoint Detection &amp; Response</b>'
+    +'<span class="edr-legend"><span class="edr-tl red"></span>'+cnt.red+' active</span>'
+    +'<span class="edr-legend"><span class="edr-tl amber"></span>'+cnt.amber+' review</span>'
+    +'<span class="edr-legend"><span class="edr-tl green"></span>'+cnt.green+' clear</span>'
+    +'<span class="edr-sub">'+hosts.length+' host'+(hosts.length===1?'':'s')+' · '+totDet+' detection'+(totDet===1?'':'s')+'</span>'
+    +'<button class="edr-xall" onclick="_edrExpandAll(true)">Expand all</button>'
+    +'<button class="edr-xall" onclick="_edrExpandAll(false)">Collapse all</button>'
+    +'</div>';
+  hosts.forEach((h,hi)=>{
+    const hl=health[hi];
     const contained=h.host_status==='contained';
     const worst=(h.detections.map(d=>(d.severity||'').toUpperCase()).sort((a,b)=>_SEV_RANK[a]-_SEV_RANK[b])[0])||'LOW';
-    html+='<div class="edr-host-card">'
-      +'<div class="edr-host-head"><span class="sev '+worst+'">'+esc(worst)+'</span>'
+    // green/contained hosts start collapsed so attention lands on red/amber.
+    const startCollapsed=hl.lvl==='green';
+    html+='<div class="edr-host-card rail-'+hl.lvl+(startCollapsed?' collapsed':'')+'">'
+      +'<div class="edr-host-head" onclick="_edrToggleHost(this)">'
+        +'<span class="edr-chev">▾</span>'
+        +'<span class="edr-tl '+hl.lvl+'" title="'+esc(hl.txt)+'"></span>'
         +'<span class="edr-host-name">'+esc(h.hostname)+'</span>'
-        +'<span class="sd-vpill '+(contained?'st-closed':'st-new')+'">'+(contained?'🔒 Contained':'● Active')+'</span>'
+        +'<span class="edr-health '+hl.lvl+'">'+esc(hl.txt)+'</span>'
+        +'<span class="sev '+worst+'">'+esc(worst)+'</span>'
         +(h.os?'<span class="edr-os">'+esc(h.os)+'</span>':'')+(h.sensor?'<span class="src-pill">'+esc(h.sensor)+'</span>':'')
         +(h.affected_users&&h.affected_users.length?'<span class="edr-host-user">'+esc(h.affected_users.join(', '))+'</span>':'')
-        +(contained?'':'<button class="edr-iso-btn" onclick="_containHostConsole(\''+esc(h.detections[0].id)+'\',\''+esc(h.hostname)+'\')">🔒 Isolate</button>')
-        +'</div>';
+        +'<span class="edr-host-count">'+h.detections.length+' det</span>'
+        +(contained?'<span class="sd-vpill st-closed">🔒 Isolated</span>':'<button class="edr-iso-btn" onclick="event.stopPropagation();_containHostConsole(\''+esc(h.detections[0].id)+'\',\''+esc(h.hostname)+'\')">🔒 Isolate</button>')
+        +'</div><div class="edr-host-body">';
     h.detections.forEach(d=>{
-      html+='<div class="edr-det"><div class="edr-det-head" onclick="osd(\''+esc(d.id)+'\')" title="Open full alert">'
-        +'<span class="sev '+((d.severity||'LOW').toUpperCase())+'">'+esc(d.severity_label||d.severity||'')+'</span>'
-        +'<span class="edr-det-title">'+esc(d.rule_name||d.title||d.id)+'</span>'
-        +'<span class="edr-det-meta">'+esc(d.alert_id||d.id)+' · '+esc((d.event_time||'').replace('T',' ').replace('Z',''))+(d.day?' · Day '+d.day:'')+'</span>'
-        +(d.verdict?'<span class="sd-vpill vd-'+(d.verdict==='True Positive'?'tp':'fp')+'">'+esc(d.verdict)+'</span>':'')+'</div>'
-        +'<div class="edr-det-body">'+_edrProcTreeHTML(d.edr_telemetry)+'</div></div>';
+      const sev=(d.severity||'LOW').toUpperCase();
+      html+='<div class="edr-det collapsed">'
+        +'<div class="edr-det-head" onclick="_edrToggleDet(this)">'
+          +'<span class="edr-chev">▸</span>'
+          +'<span class="sev '+sev+'">'+esc(d.severity_label||d.severity||'')+'</span>'
+          +'<span class="edr-det-title">'+esc(d.rule_name||d.title||d.id)+'</span>'
+          +'<span class="edr-det-chain">'+esc(_edrChain(d.edr_telemetry)||'—')+'</span>'
+          +(d.verdict?'<span class="sd-vpill vd-'+(d.verdict==='True Positive'?'tp':'fp')+'">'+esc(d.verdict)+'</span>':'')
+          +'<a class="edr-open" onclick="event.stopPropagation();osd(\''+esc(d.id)+'\')" title="Open full alert">Open ↗</a>'
+        +'</div>'
+        +'<div class="edr-det-body"><div class="edr-det-meta">'+esc(d.alert_id||d.id)+' · '+esc((d.event_time||'').replace('T',' ').replace('Z',''))+(d.day?' · Day '+d.day:'')+'</div>'+_edrProcTreeHTML(d.edr_telemetry)+'</div>'
+      +'</div>';
     });
-    html+='</div>';
+    html+='</div></div>';
   });
   html+='</div>';
   body.innerHTML=html;
 }
+function _edrToggleHost(el){const c=el.closest('.edr-host-card');if(c)c.classList.toggle('collapsed')}
+function _edrToggleDet(el){const d=el.closest('.edr-det');if(d)d.classList.toggle('collapsed')}
+function _edrExpandAll(open){document.querySelectorAll('#w-tool .edr-host-card,#w-tool .edr-det').forEach(el=>el.classList.toggle('collapsed',!open))}
 async function _containHostConsole(alertId,hostname){
   if(!confirm('Isolate '+hostname+' from the network? Simulates cutting the endpoint off to stop an active compromise.'))return;
   try{
