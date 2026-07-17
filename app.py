@@ -4689,6 +4689,28 @@ async def api_siem_note(alert_id: str, body: SiemNoteReq):
             bonus = 5
     return {"ok": True, "bonus_points": bonus}
 
+@app.post("/api/siem/{alert_id}/contain")
+async def api_siem_contain(alert_id: str):
+    """Isolate the endpoint referenced by an alert. Mirrors the triage
+    pattern: mutates the same siem_col doc (edr_telemetry.host_status ->
+    'contained', stamps contained_at). Only valid on alerts that actually
+    carry endpoint telemetry. State-change only — no scoring, no physics
+    cascade (containment has no authored physics rule yet)."""
+    alert = siem_col.find_one({"id": alert_id, "simulation_id": sim_id()}, {"_id": 0})
+    if not alert:
+        raise HTTPException(404, "Alert not found")
+    if not (alert.get("edr_telemetry") or {}).get("process_tree"):
+        raise HTTPException(400, detail={"error": "no_telemetry",
+            "message": "This alert has no endpoint telemetry — nothing to isolate."})
+    now_iso = datetime.utcnow().isoformat() + "Z"
+    siem_col.update_one(
+        {"id": alert_id, "simulation_id": sim_id()},
+        {"$set": {"edr_telemetry.host_status": "contained",
+                  "edr_telemetry.contained_at": now_iso}},
+    )
+    hostname = alert.get("hostname") or (alert.get("edr_telemetry") or {}).get("os") or "the host"
+    return {"ok": True, "host_status": "contained", "contained_at": now_iso, "hostname": hostname}
+
 @app.get("/api/jira")
 async def api_jira():
     _day = _current_day()

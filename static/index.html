@@ -2455,7 +2455,24 @@ function _edrPane(a){
   const files=fe.length?('<div class="sd-section"><h4>File Events</h4><div class="edr-tblwrap"><table class="edr-tbl"><thead><tr><th>Time</th><th>Action</th><th>Path</th><th>Process</th></tr></thead><tbody>'
     +fe.map(e=>'<tr><td class="mono">'+esc((e.ts||'').slice(11,19))+'</td><td><span class="edr-fa '+esc(e.action||'')+'">'+esc(e.action||'')+'</span></td><td class="mono">'+esc(e.path||'')+'</td><td class="mono">'+esc(e.process||'')+'</td></tr>').join('')
     +'</tbody></table></div></div>'):'';
-  return head+tree+net+files;
+  const isolate=(hs==='contained')
+    ?'<div class="edr-actions"><span class="sd-vpill st-closed">🔒 Host isolated from the network</span></div>'
+    :'<div class="edr-actions"><button class="sd-act escalate" onclick="_containHost(\''+esc(a.id)+'\')">🔒 Isolate Host</button></div>';
+  return head+tree+net+files+isolate;
+}
+async function _containHost(id){
+  const a=_siemAlerts.find(x=>x.id===id);if(!a)return;
+  const host=(a.hostname||'the host');
+  if(!confirm('Isolate '+host+' from the network? This simulates cutting the endpoint off to stop an active compromise.'))return;
+  try{
+    const d=await api.post('/api/siem/'+id+'/contain',{});
+    if(a.edr_telemetry){a.edr_telemetry.host_status='contained';a.edr_telemetry.contained_at=d.contained_at}
+    toast('🔒 '+(d.hostname||host)+' isolated from the network','success');
+    (d.effects||[]).forEach((ef,ix)=>setTimeout(()=>showPhysicsToast(ef),400+ix*700));
+    if(d.effects&&d.effects.length&&typeof _refreshAfterPhysics==='function')_refreshAfterPhysics(d.effects);
+    osd(id); // re-render drawer: badge flips, button becomes the isolated pill
+    const p=document.querySelector('#sdContent .sd-tab[onclick*="edr"]');if(p)_sdTab(p,'edr');
+  }catch(e){toast('Isolate failed: '+((e&&e.message)||''),'error')}
 }
 function osd(id){
   const a=_siemAlerts.find(x=>x.id===id);if(!a)return;
