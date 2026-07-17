@@ -104,6 +104,16 @@ WORKPLACE_PHYSICS: dict[str, dict] = {
         ],
     },
 
+    "siem.host_contained": {
+        "triggers": [
+            {"type": "slack_message", "channel": "#security-incidents",
+             "message": "🔒 HOST ISOLATED: {hostname} contained from the network by {user_name} (alert {alert_id}) — {alert_title}"},
+            {"type": "agent_email", "from": "manager", "subject": "Containment on {hostname} — good call",
+             "body": "I see you isolated {hostname} off the back of {alert_id}. That's the right instinct when a host is showing active post-exploitation — stop the bleeding first, investigate second. Confirm you've preserved a memory image before anyone reimages it, and let me know what the EDR process tree told you. Nice decisive work."},
+            {"type": "performance_note", "note": "Isolated a compromised host during active investigation — decisive incident response", "points": 10},
+        ],
+    },
+
     # ─── JIRA / SOFTWARE DEV ──────────────────────────────
     "jira.close_ticket_correct": {
         "triggers": [

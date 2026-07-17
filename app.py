@@ -4702,6 +4702,7 @@ async def api_siem_contain(alert_id: str):
     if not (alert.get("edr_telemetry") or {}).get("process_tree"):
         raise HTTPException(400, detail={"error": "no_telemetry",
             "message": "This alert has no endpoint telemetry — nothing to isolate."})
+    already_contained = (alert.get("edr_telemetry") or {}).get("host_status") == "contained"
     now_iso = datetime.utcnow().isoformat() + "Z"
     siem_col.update_one(
         {"id": alert_id, "simulation_id": sim_id()},
@@ -4709,7 +4710,31 @@ async def api_siem_contain(alert_id: str):
                   "edr_telemetry.contained_at": now_iso}},
     )
     hostname = alert.get("hostname") or (alert.get("edr_telemetry") or {}).get("os") or "the host"
-    return {"ok": True, "host_status": "contained", "contained_at": now_iso, "hostname": hostname}
+
+    # ── Physics cascade — fire once (re-containing a host is a no-op) ──
+    physics_effects: list[dict] = []
+    if not already_contained:
+        try:
+            sess = sessions_col.find_one({"session_id": session_id()}, {"_id": 0}) or {}
+            cfg = CAREER_CONFIGS.get(get_career() or "cybersecurity", CAREER_CONFIGS["cybersecurity"])
+            engine = WorkplacePhysicsEngine(
+                emails_col=emails_col, tasks_col=tasks_col, tools_col=tools_col,
+                slack_col=slack_col, evals_col=evals_col, jira_col=jira_col,
+                sessions_col=sessions_col, career_config=cfg,
+                sim_id=sim_id(), session_id=session_id(),
+                user_id=sess.get("user_id") or "anon",
+                user_name=sess.get("user_name") or sess.get("name") or "the analyst",
+            )
+            physics_effects = engine.process("siem.host_contained", {
+                "hostname": hostname,
+                "alert_id": alert.get("alert_id") or alert_id,
+                "alert_title": alert.get("title") or "",
+            })
+        except Exception as ex:
+            log.warning("siem.contain.physics.fail err=%s", ex)
+
+    return {"ok": True, "host_status": "contained", "contained_at": now_iso,
+            "hostname": hostname, "effects": physics_effects}
 
 @app.get("/api/jira")
 async def api_jira():
