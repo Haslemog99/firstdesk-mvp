@@ -1654,6 +1654,7 @@ async function _loadLevelMeta(career){
   }
 }
 function _updateDayPill(career, day){
+  if(day)window._curDay=Number(day)||1;
   const pill=document.getElementById('dayPill');if(!pill)return;
   if(!career){pill.style.display='none';return}
   pill.style.display='inline-flex';
@@ -1670,6 +1671,7 @@ async function _pollSimClock(){
     const r=await fetch(A+'/api/sim_clock');
     if(!r.ok)return;
     const d=await r.json();
+    window._simNow=d.sim_time||window._simNow;
     el.style.display='inline-flex';
     el.textContent=(d.sim_time||'09:00')+' · '+_fmtRemaining(d.remaining_real_sec||0);
     if((d.remaining_real_sec||0)<=15*60)el.classList.add('urgent');else el.classList.remove('urgent');
@@ -2249,7 +2251,13 @@ function _siemSlaInfo(a){
   const ts=a.timestamp?new Date(a.timestamp).getTime():null;
   if(!ts){return{label:'—',cls:'ok'}}
   const due=ts+hrs*3600*1000;
-  const now=Date.now();
+  // SLA runs on the SIM clock, not wall-clock: "now" is the current sim
+  // time (HH:MM from /api/sim_clock) placed on the sim-day's fictional
+  // date (day N = 2026-02-(17+N)). Comparing authored Feb-2026 timestamps
+  // against real Date.now() showed every alert as BREACHED by months.
+  const simHM=window._simNow||'12:00';
+  const dayDate=window._curDay?('2026-02-'+String(17+Number(window._curDay)).padStart(2,'0')):(a.timestamp||'').slice(0,10);
+  const now=Date.parse(dayDate+'T'+simHM+':00Z')||Date.now();
   const remMs=due-now;
   if(remMs<=0){const over=Math.round(-remMs/60000);return{label:'BREACHED -'+over+'m',cls:'breached'}}
   const remMin=Math.round(remMs/60000);
