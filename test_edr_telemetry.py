@@ -139,6 +139,18 @@ for a in day1:
     if a["id"] != "ALERT-2026-0218-002" and a.get("edr_telemetry"):
         validate_telemetry(a)
 
+# ── day-pack (Days 2–5) telemetried alerts validate identically ────────
+mp = re.search(r'_CYBER_DAY_PACKS: dict\[int, list\[dict\]\] = (\{.*?\n\})\n', SRC, re.S)
+packs = ast.literal_eval(mp.group(1))
+pack_tel = 0
+for day, lst in packs.items():
+    for raw in lst:
+        a = enrich(dict(raw))
+        if a.get("edr_telemetry"):
+            pack_tel += 1
+            validate_telemetry(a)
+check(pack_tel >= 3, f"expected >=3 telemetried day-pack alerts, found {pack_tel}")
+
 if fails:
     print(f"FAIL — {len(fails)} assertion(s):")
     for f in fails[:30]:
