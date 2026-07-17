@@ -54,7 +54,13 @@ def validate_telemetry(a):
     check(len(pt) >= 1, f"{aid}: process_tree empty")
 
     # 2 ── sensor / os / status / collected_at ─────────────────────────
-    check(t.get("sensor") == a.get("source_detail"), f"{aid}: sensor != source_detail ({t.get('sensor')} vs {a.get('source_detail')})")
+    # sensor: equals the alerting source when that source IS an endpoint
+    # sensor (EDR/AV); otherwise (SIEM/DAM/IAM-sourced alerts) telemetry is
+    # pulled from the host's EDR agent.
+    allowed_sensors = {a.get("source_detail")}
+    if a.get("source") not in ("EDR", "AV"):
+        allowed_sensors |= {"CrowdStrike Falcon", "Windows Defender"}
+    check(t.get("sensor") in allowed_sensors, f"{aid}: sensor {t.get('sensor')!r} not in {allowed_sensors}")
     check(bool(t.get("os")), f"{aid}: os missing")
     check(t.get("host_status") in ("active", "contained"), f"{aid}: bad host_status {t.get('host_status')}")
     check(t.get("collected_at", "") >= a.get("detection_time", ""), f"{aid}: collected_at before detection_time")
