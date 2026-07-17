@@ -1054,6 +1054,16 @@ def _noise_templates(rng: "random.Random", pools: dict, mon_day: str) -> list:
     return [(20, n1_health), (12, n2_scan), (12, n3_defender), (10, n4_bandwidth),
             (8, n5_cert), (10, n6_lockout), (16, n7_vpn), (12, n8_nxdomain)]
 
+# Per-day noise volume: Day 1 is a full shift backlog (~100 total with the
+# 15 authored signal alerts); rollover days stay lighter so each day-pack's
+# 5 signal alerts aren't drowned at reveal time.
+_NOISE_PER_DAY = {1: 85, 2: 30, 3: 28, 4: 32, 5: 26}
+
+def _noise_seed(sim: str, day: int) -> int:
+    """Deterministic per (simulation, day): two sims differ, re-runs match —
+    which also makes noise idempotent through _insert_day_pack's id check."""
+    return int(hashlib.md5(f"{sim}:{day}".encode()).hexdigest(), 16) % (2 ** 32)
+
 def _generate_noise_alerts(day: int, count: int, seed: int) -> list[dict]:
     """Deterministic Tier-1 noise: same (day, count, seed) → byte-identical
     output. Pure function — no sim_id/Mongo access; the insertion path stamps
@@ -1120,6 +1130,12 @@ def seed_cybersecurity(cfg):
         {"id":"ALERT-2026-0218-014","simulation_id":_sim,"timestamp":"2026-02-18T09:01:12Z","severity":"LOW","confidence":8,"source":"Windows Security","source_detail":"DC01","log_source":"Windows Security (DC01)","title":"3 failed logons (Event 4625) followed by success (Event 4624) — likely typo","description":"Normal fat-finger pattern — 3× Event ID 4625 (failed logon, bad password) then Event ID 4624 (successful logon), same user, same workstation.","details":"m.johnson — 3× 4625 (Status 0xC000006A) then 4624 within 31 seconds. WS-SALES-03 → DC01.","src_ip":"10.0.2.44","src_host":"WS-SALES-03","src_user":"m.johnson","dst_ip":"10.0.0.10","dst_geo":"London, UK (internal)","dst_reputation":"Internal","affected_asset":"DC01 (domain controller)","mitre_tactic":"Credential Access","mitre_technique":"T1110.001","mitre_name":"Brute Force: Password Guessing","status":"open","triage_status":"unreviewed","sla_hours":8,"is_real_threat":False,"threat_type":"false_positive","correct_action":"resolve","points":5,"related_alerts":[],"playbook":"IR-FP-LOGIN: Typo Pattern","playbook_steps":["Review 4625/4624 sequence in the logon window","Confirm same source workstation for all attempts","Mark resolved"],"raw_log":"Feb 18 09:01:12 DC01 Microsoft-Windows-Security-Auditing EventID=4625 Status=0xC000006A TargetUser=m.johnson Workstation=WS-SALES-03 IpAddress=10.0.2.44 LogonType=3 (3 events 09:00:41-09:01:05) | EventID=4624 TargetUser=m.johnson Workstation=WS-SALES-03 IpAddress=10.0.2.44 LogonType=3","analyst_notes":"","false_positive_indicators":"User mistyped password — successful on 4th attempt, normal pattern"},
         {"id":"ALERT-2026-0218-015","simulation_id":_sim,"timestamp":"2026-02-18T08:30:44Z","severity":"MEDIUM","confidence":50,"source":"DAM","source_detail":"Imperva Database Activity Monitor","title":"Anomalous large customer SELECT","description":"SELECT * FROM customers WHERE region='ALL' returned 45,000 rows. Could be batch job — or harvesting.","details":"app-server-02 (svc_api) executed SELECT * FROM customers WHERE region='ALL' — 45,000 rows. No matching scheduled job logged.","src_ip":"10.0.6.20","src_host":"APP-SERVER-02","src_user":"svc_api","dst_ip":"10.0.4.22","dst_geo":"Internal","dst_reputation":"Internal","affected_asset":"PROD-DB-01 (customers table)","mitre_tactic":"Collection","mitre_technique":"T1213","mitre_name":"Data from Information Repositories","status":"open","triage_status":"unreviewed","sla_hours":4,"is_real_threat":None,"threat_type":"ambiguous","correct_action":"investigate","points":10,"related_alerts":[],"playbook":"IR-INV-DAM: Anomalous Query","playbook_steps":["Cross-check scheduled batch job calendar","Inspect svc_api recent process tree","Confirm with data team whether the export was sanctioned"],"raw_log":"Feb 18 08:30:44 imperva dam src=APP-SERVER-02 user=svc_api db=customers query=\"SELECT * FROM customers WHERE region='ALL'\" rows=45000 anomaly_score=0.72","analyst_notes":"","false_positive_indicators":None},
     ]])
+    # Noise layer: authored signal above stays untouched; noise is generated,
+    # enriched through the same pipeline, and stamped with this sim's id.
+    siem_col.insert_many([
+        _enrich_soc_alert({**a, "simulation_id": _sim})
+        for a in _generate_noise_alerts(1, _NOISE_PER_DAY[1], _noise_seed(_sim, 1))
+    ])
     _seed_cybersecurity_siem_only()
 
 def _seed_cybersecurity_siem_only():
@@ -4280,7 +4296,11 @@ async def api_invoices():
 
 @app.get("/api/siem")
 async def api_siem():
-    return {"alerts": list(siem_col.find({"simulation_id": sim_id(), "day": {"$lte": _current_day()}}, {"_id": 0}))}
+    # Newest-first, like a real SIEM queue default — and it interleaves the
+    # authored signal into the generated noise instead of block-ordering them.
+    return {"alerts": list(siem_col.find(
+        {"simulation_id": sim_id(), "day": {"$lte": _current_day()}}, {"_id": 0}
+    ).sort([("day", -1), ("timestamp", -1)]))}
 
 _DAY_PACK_COLS = {
     "emails": emails_col,
@@ -4321,7 +4341,10 @@ async def api_advance_day():
     _sim = sim_id()
     # Cyber-specific SIEM alerts (legacy pack still drives the SIEM tab).
     if career == "cybersecurity":
-        revealed += _insert_day_pack([_enrich_soc_alert(a) for a in (_CYBER_DAY_PACKS.get(nxt) or [])], siem_col, nxt, _sim)
+        revealed += _insert_day_pack(
+            [_enrich_soc_alert(a) for a in
+             (_CYBER_DAY_PACKS.get(nxt) or []) + _generate_noise_alerts(nxt, _NOISE_PER_DAY.get(nxt, 30), _noise_seed(_sim, nxt))],
+            siem_col, nxt, _sim)
     # Unified pack: emails/tasks/invoices/jira/campaigns for all careers.
     day_pack = (_DAY_PACKS.get(career) or {}).get(nxt) or {}
     for sub_key, col in _DAY_PACK_COLS.items():
@@ -4371,7 +4394,10 @@ async def api_next_day():
     nxt = cur + 1
     revealed = 0
     if career == "cybersecurity":
-        revealed += _insert_day_pack([_enrich_soc_alert(a) for a in (_CYBER_DAY_PACKS.get(nxt) or [])], siem_col, nxt, _sim)
+        revealed += _insert_day_pack(
+            [_enrich_soc_alert(a) for a in
+             (_CYBER_DAY_PACKS.get(nxt) or []) + _generate_noise_alerts(nxt, _NOISE_PER_DAY.get(nxt, 30), _noise_seed(_sim, nxt))],
+            siem_col, nxt, _sim)
     day_pack = (_DAY_PACKS.get(career) or {}).get(nxt) or {}
     for sub_key, col in _DAY_PACK_COLS.items():
         revealed += _insert_day_pack(day_pack.get(sub_key) or [], col, nxt, _sim)

@@ -2273,13 +2273,25 @@ function _siemSparkline(alerts){
   const total=alerts.length;
   return '<div class="siem-spark-wrap" title="Alert volume — last 24 hours">'+svg+'<span class="siem-spark-lbl">24h volume<b>'+total+' alert'+(total===1?'':'s')+'</b></span></div>';
 }
+const _SEV_RANK={CRITICAL:0,HIGH:1,MEDIUM:2,LOW:3};
+window._siemSort=window._siemSort||null; // null=server order | {key:'sev'|'time',dir:1|-1}
+function _siemSortBy(key){
+  const s=window._siemSort;
+  window._siemSort=(s&&s.key===key)?(s.dir===1?{key,dir:-1}:null):{key,dir:1};
+  renderSiem(_siemAlerts);
+}
 function renderSiem(alerts){
   _siemAlerts=alerts.slice();
   const body=document.querySelector('#w-tool .tp-body');
   if(!body)return;
   const tp=document.querySelector('#w-tool .tp');
   if(tp)tp.classList.add('siem-dark');
-  const rows=alerts.map(a=>{
+  let view=alerts.slice();
+  const srt=window._siemSort;
+  if(srt&&srt.key==='sev')view.sort((a,b)=>srt.dir*((_SEV_RANK[(a.severity||'LOW').toUpperCase()]??9)-(_SEV_RANK[(b.severity||'LOW').toUpperCase()]??9)));
+  if(srt&&srt.key==='time')view.sort((a,b)=>srt.dir*String(b.timestamp||'').localeCompare(String(a.timestamp||'')));
+  const _arr=k=>srt&&srt.key===k?(srt.dir===1?' ▲':' ▼'):'';
+  const rows=view.map(a=>{
     const sev=(a.severity||'LOW').toUpperCase();
     const sla=_siemSlaInfo(a);
     const status=(a.status&&a.status!=='open')?(a.status==='resolve'?'CLOSED (FP)':a.status==='escalate'?'ESCALATED':'IN PROGRESS'):(a.owned_at?'IN PROGRESS':'NEW');
@@ -2303,7 +2315,7 @@ function renderSiem(alerts){
   }).join('');
   body.innerHTML='<div class="siem-summary" id="siemSummary"><b style="font-size:10.5px;letter-spacing:0.07em;text-transform:uppercase;opacity:0.65;margin-right:6px">Alert Queue — Tier 1</b>'+_siemSummaryHTML(alerts)+_siemSparkline(alerts)+'</div>'
     +'<div style="overflow:auto;max-height:calc(100% - 40px)"><table class="siem-tbl" id="toolTable"><thead><tr>'
-    +'<th>ID</th><th>'+_bgTip('alerts','TIME','Time')+'</th><th>'+_bgTip('alerts','SEV','Sev')+'</th><th>Conf</th><th>'+_bgTip('alerts','SOURCE','Source')+'</th><th>'+_bgTip('alerts','TITLE','Title')+'</th><th>Src → Dst</th><th>Asset</th><th>MITRE</th><th>SLA</th><th>'+_bgTip('alerts','STATUS','Status')+'</th>'
+    +'<th>ID</th><th style="cursor:pointer" onclick="_siemSortBy(\'time\')" title="Sort by time">'+_bgTip('alerts','TIME','Time')+_arr('time')+'</th><th style="cursor:pointer" onclick="_siemSortBy(\'sev\')" title="Sort by severity">'+_bgTip('alerts','SEV','Sev')+_arr('sev')+'</th><th>Conf</th><th>'+_bgTip('alerts','SOURCE','Source')+'</th><th>'+_bgTip('alerts','TITLE','Title')+'</th><th>Src → Dst</th><th>Asset</th><th>MITRE</th><th>SLA</th><th>'+_bgTip('alerts','STATUS','Status')+'</th>'
     +'</tr></thead><tbody>'+(rows||'<tr><td colspan="11" style="text-align:center;color:#999;padding:20px">No alerts</td></tr>')+'</tbody></table></div>';
 }
 function _sdTab(el,name){
