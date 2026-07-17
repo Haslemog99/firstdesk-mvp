@@ -11,7 +11,7 @@ Architecture:
 Careers: Accountant | Cybersecurity | Marketing | Developer
 Agents: Manager | Client | Teammate | IT Support (+ HR as system)
 """
-import os, json, uuid, hashlib, hmac, base64, secrets, time, re
+import os, json, uuid, hashlib, hmac, base64, secrets, time, re, random
 import logging
 import contextvars
 import asyncio
@@ -863,6 +863,221 @@ def _enrich_soc_alert(a: dict) -> dict:
         else:
             out["ip_reputation"] = out.get("dst_reputation") or "No threat intel match"
 
+    return out
+
+# ── SOC noise layer (authored signal + generated noise) ───────────────
+# Deterministic, template-driven Tier-1 noise. NO free-text generation:
+# every alert is a parameter-pool expansion, so output is always
+# convention-clean (RFC1918 internals, public externals, structured
+# hostnames, correct event IDs) and byte-reproducible per (day, seed).
+# Contract pinned by test_noise_alerts.py.
+
+_NOISE_POOLS = {
+    # (hostname, internal RFC1918 ip)
+    "workstations": [
+        ("WS-FIN-011", "10.0.1.11"), ("WS-FIN-014", "10.0.1.14"),
+        ("WS-HR-05", "10.0.2.5"), ("WS-SALES-07", "10.0.3.7"),
+        ("WS-SALES-09", "10.0.3.9"), ("WS-MKT-03", "10.0.4.3"),
+        ("WS-OPS-02", "10.0.5.2"), ("WS-OPS-11", "10.0.5.11"),
+        ("WS-ENG-021", "10.0.5.21"), ("WS-ENG-024", "10.0.5.24"),
+    ],
+    "servers": [
+        ("PROD-WEB-01", "10.0.6.10"), ("PROD-APP-03", "10.0.6.13"),
+        ("STAGING-DB-02", "10.0.7.12"), ("FILE-SRV-01", "10.0.7.21"),
+        ("PRINT-SRV-01", "10.0.7.31"), ("BACKUP-SRV-01", "10.0.8.11"),
+        ("MAIL-GW-01", "10.0.8.21"), ("DC01", "10.0.0.10"), ("DC02", "10.0.0.11"),
+    ],
+    "users": ["d.okafor", "s.whitmore", "p.novak", "l.tran", "c.mbeki",
+              "h.larsson", "t.reyes", "b.kowalski", "g.osei", "e.tanaka"],
+    # (service label, public ip, reputation string, user activity that explains the volume)
+    "good_dst": [
+        ("Zoom", "170.114.52.2", "Verified Zoom Video Communications infrastructure — SaaS allow-list", "an all-hands video call"),
+        ("Microsoft Teams", "52.113.194.132", "Verified Microsoft Teams infrastructure — SaaS allow-list", "screen-share meetings running all morning"),
+        ("Google Drive", "142.250.187.234", "Verified Google Workspace infrastructure — corporate tenant", "a bulk file sync to the corporate Drive"),
+        ("OneDrive", "13.107.42.12", "Verified Microsoft OneDrive infrastructure — corporate tenant", "the initial sync of a rebuilt laptop"),
+    ],
+}
+
+def _noise_templates(rng: "random.Random", pools: dict, mon_day: str) -> list:
+    """Returns [(weight, builder)] — each builder yields the template-specific
+    field overlay. mon_day is the 'Feb 19'-style raw-log date prefix."""
+    W, S, U, G = pools["workstations"], pools["servers"], pools["users"], pools["good_dst"]
+
+    def n1_health():
+        h, ip = rng.choice(S)
+        t = f"{rng.randint(0,16):02d}:{rng.randrange(0,60,5):02d}:00"
+        return {"_t": t, "severity": "LOW", "confidence": 5, "points": 2,
+            "source": "Network Monitor", "source_detail": "PRTG",
+            "title": f"ICMP health check — {h}",
+            "description": f"Scheduled PRTG availability probe against {h} — automated 5-minute health check.",
+            "details": f"PRTG-MON-01 → {h} ({ip}), ICMP echo, result ok. Permanent whitelist entry.",
+            "src_ip": "10.0.3.15", "src_host": "PRTG-MON-01", "src_user": "prtg",
+            "dst_ip": ip, "dst_geo": "Internal", "dst_reputation": "Internal",
+            "affected_asset": h, "mitre_tactic": "-", "mitre_technique": "-", "mitre_name": "-",
+            "playbook": "IR-FP-MON: Monitoring Tool",
+            "playbook_steps": ["Confirm source is PRTG-MON-01 (10.0.3.15)", "Close as benign — permanent whitelist"],
+            "raw_log": f"{mon_day} {t} PRTG icmp src=10.0.3.15 dst={ip} type=8 result=ok rtt=2ms",
+            "false_positive_indicators": "PRTG monitoring — permanent whitelist entry, fires every 5 minutes"}
+
+    def n2_scan():
+        h, ip = rng.choice(S)
+        cr = f"CR-2026-{rng.randint(850, 899):04d}"
+        t = f"{rng.randint(1,5):02d}:{rng.randint(0,59):02d}:{rng.randint(0,59):02d}"
+        return {"_t": t, "severity": rng.choice(["LOW", "MEDIUM"]), "confidence": rng.randint(10, 20), "points": 3,
+            "source": "Firewall", "source_detail": "Palo Alto PA-5260",
+            "title": f"Authenticated vulnerability scan — {h}",
+            "description": f"Credentialed Nessus sweep against {h} from the scan appliance — matches the weekly maintenance window ({cr}).",
+            "details": f"SCAN-SERVER-01 (10.0.1.100) → {h} ({ip}), authenticated plugin set, change request {cr}.",
+            "src_ip": "10.0.1.100", "src_host": "SCAN-SERVER-01", "src_user": "nessus",
+            "dst_ip": ip, "dst_geo": "Internal", "dst_reputation": "Internal",
+            "affected_asset": h,
+            "mitre_tactic": "Discovery", "mitre_technique": "T1046", "mitre_name": "Network Service Discovery",
+            "playbook": "IR-FP-SCAN: Scheduled Scan FP",
+            "playbook_steps": [f"Confirm {cr} covers this window", "Close as benign — sanctioned scan"],
+            "raw_log": f"{mon_day} {t} PA-5260 SCAN src=10.0.1.100 dst={ip} user=nessus profile=weekly_auth cr={cr}",
+            "false_positive_indicators": f"Scheduled authenticated Nessus scan — change request {cr} covers this window"}
+
+    def n3_defender():
+        h, ip = rng.choice(W)
+        u = rng.choice(U)
+        ver = f"1.403.{rng.randint(100, 999)}.0"
+        t = f"{rng.randint(6,16):02d}:{rng.randint(0,59):02d}:{rng.randint(0,59):02d}"
+        return {"_t": t, "severity": "LOW", "confidence": 5, "points": 2,
+            "source": "AV", "source_detail": "Windows Defender",
+            "title": f"Defender definition update — {h}",
+            "description": f"Windows Defender pulled signature package {ver} on {h}. Operational event, not a detection.",
+            "details": f"{h} ({u}) — platform update to {ver}, result success.",
+            "src_ip": ip, "src_host": h, "src_user": u,
+            "dst_ip": "-", "dst_geo": "-", "dst_reputation": "-",
+            "affected_asset": h, "mitre_tactic": "-", "mitre_technique": "-", "mitre_name": "-",
+            "playbook": "IR-FP-OPS: Operational Event",
+            "playbook_steps": ["Verify event type is a definition update", "Close as benign — routine maintenance"],
+            "raw_log": f"{mon_day} {t} {h} Defender SignatureUpdate version={ver} result=success",
+            "false_positive_indicators": "Routine Defender platform update — operational event, not a detection"}
+
+    def n4_bandwidth():
+        h, ip = rng.choice(W)
+        u = rng.choice(U)
+        svc, dip, rep, activity = rng.choice(G)
+        gb = round(rng.uniform(1.5, 4.0), 1)
+        t = f"{rng.randint(9,16):02d}:{rng.randint(0,59):02d}:{rng.randint(0,59):02d}"
+        return {"_t": t, "severity": "MEDIUM", "confidence": rng.randint(15, 25), "points": 5,
+            "source": "Firewall", "source_detail": "Palo Alto PA-5260",
+            "title": f"High outbound data volume — {h} to {svc}",
+            "description": f"{gb} GB outbound from {h} in under an hour. Destination resolves to {svc} — check before treating as exfiltration.",
+            "details": f"{h} ({u}) → {dip} ({svc}), {gb} GB HTTPS during business hours. User was on {activity}.",
+            "src_ip": ip, "src_host": h, "src_user": u,
+            "dst_ip": dip, "dst_geo": "USA (SaaS)", "dst_reputation": rep,
+            "affected_asset": h,
+            "mitre_tactic": "Exfiltration", "mitre_technique": "T1048", "mitre_name": "Exfiltration Over Alternative Protocol",
+            "playbook": "IR-FP-BW: Bandwidth to Known-Good Destination",
+            "playbook_steps": [f"Verify destination ownership ({svc} allow-list)", f"Confirm the user activity that explains the volume ({activity})", "Close as benign if destination verified"],
+            "raw_log": f"{mon_day} {t} PA-5260 traffic src={ip} dst={dip} app=ssl bytes_out={int(gb*1073741824)} user={u}",
+            "false_positive_indicators": f"Destination is verified {svc} infrastructure — user was on {activity}"}
+
+    def n5_cert():
+        h, ip = rng.choice(S)
+        inc = f"INC-{rng.randint(4500, 4599)}"
+        days = rng.randint(7, 14)
+        t = f"{rng.randint(7,15):02d}:{rng.randint(0,59):02d}:{rng.randint(0,59):02d}"
+        return {"_t": t, "severity": rng.choice(["LOW", "MEDIUM"]), "confidence": 20, "points": 3,
+            "source": "Web Proxy", "source_detail": "Zscaler",
+            "title": f"TLS certificate expiring — {h}",
+            "description": f"Certificate on {h} expires in {days} days. Renewal ticket {inc} already open with IT.",
+            "details": f"{h} ({ip}) internal service cert, {days} days to expiry, {inc} in progress.",
+            "src_ip": "-", "src_host": h, "src_user": "-",
+            "dst_ip": ip, "dst_geo": "Internal", "dst_reputation": "Internal",
+            "affected_asset": h, "mitre_tactic": "-", "mitre_technique": "-", "mitre_name": "-",
+            "playbook": "IR-FP-CERT: Known Cert Issue",
+            "playbook_steps": [f"Confirm {inc} is open", "Close as benign — renewal in progress"],
+            "raw_log": f"{mon_day} {t} zscaler tls_warning host={h} days_to_expiry={days} ticket={inc}",
+            "false_positive_indicators": f"Known renewal in progress — IT ticket {inc} open"}
+
+    def n6_lockout():
+        h, ip = rng.choice(W)
+        u = rng.choice(U)
+        dc, dcip = rng.choice([("DC01", "10.0.0.10"), ("DC02", "10.0.0.11")])
+        mins = rng.randint(2, 6)
+        t = f"{rng.randint(8,16):02d}:{rng.randint(0,59):02d}:{rng.randint(0,59):02d}"
+        return {"_t": t, "severity": "MEDIUM", "confidence": 25, "points": 5,
+            "source": "Windows Security", "source_detail": dc,
+            "title": f"Account lockout (Event 4740) then self-service reset — {u}",
+            "description": f"Event ID 4740: account lockout for {u} from {h}, followed by a successful self-service password reset {mins} minutes later from the same registered device.",
+            "details": f"{u} locked out on {dc} (Event 4740, Status 0xC0000234), SSPR success +{mins}m from {h}.",
+            "src_ip": ip, "src_host": h, "src_user": u,
+            "dst_ip": dcip, "dst_geo": "London, UK (internal)", "dst_reputation": "Internal",
+            "affected_asset": f"{dc} (domain controller)",
+            "mitre_tactic": "Credential Access", "mitre_technique": "T1110.001", "mitre_name": "Brute Force: Password Guessing",
+            "playbook": "IR-FP-LOCKOUT: Lockout + SSPR Pattern",
+            "playbook_steps": ["Confirm the 4740 → SSPR sequence and timing", "Verify reset came from the user's registered device", "Close as benign — forgotten-password pattern"],
+            "raw_log": f"{mon_day} {t} {dc} Microsoft-Windows-Security-Auditing EventID=4740 Status=0xC0000234 TargetUser={u} CallerComputer={h} | SSPR reset success +{mins}m device={h}",
+            "false_positive_indicators": "Lockout followed by successful self-service reset from the user's registered device — forgotten-password pattern"}
+
+    def n7_vpn():
+        u = rng.choice(U)
+        pub = f"86.{rng.randint(1, 254)}.{rng.randint(1, 254)}.{rng.randint(2, 250)}"
+        flaps = rng.randint(3, 6)
+        t = f"{rng.randint(7,16):02d}:{rng.randint(0,59):02d}:{rng.randint(0,59):02d}"
+        return {"_t": t, "severity": "LOW", "confidence": 5, "points": 2,
+            "source": "IAM", "source_detail": "Cisco AnyConnect",
+            "title": f"VPN reconnect flapping — {u}",
+            "description": f"{u} reconnected to the VPN {flaps} times in 20 minutes from the same residential IP. MFA passed on every attempt.",
+            "details": f"{flaps} connect/disconnect cycles, same source {pub}, same device posture, MFA passed each time.",
+            "src_ip": pub, "src_host": "(external — residential ISP)", "src_user": u,
+            "dst_ip": "10.0.0.50", "dst_geo": "Internal", "dst_reputation": "Internal",
+            "affected_asset": "VPN concentrator",
+            "mitre_tactic": "-", "mitre_technique": "-", "mitre_name": "-",
+            "playbook": "IR-FP-VPN: Connection Flapping",
+            "playbook_steps": ["Confirm same source IP + device posture across reconnects", "Close as benign — unstable home connection"],
+            "raw_log": f"{mon_day} {t} anyconnect user={u} src={pub} events=connect,disconnect x{flaps} mfa=passed posture=compliant",
+            "false_positive_indicators": "Unstable residential connection — MFA passed on every reconnect, same device posture"}
+
+    def n8_nxdomain():
+        h, ip = rng.choice(S)
+        n = rng.randint(200, 400)
+        inc = f"INC-{rng.randint(4500, 4599)}"
+        t = f"{rng.randint(0,16):02d}:{rng.randint(0,59):02d}:{rng.randint(0,59):02d}"
+        return {"_t": t, "severity": "LOW", "confidence": 10, "points": 3,
+            "source": "DNS Proxy", "source_detail": "Cisco Umbrella",
+            "title": f"NXDOMAIN burst — {h}",
+            "description": f"{n} failed lookups for legacy-api.corp.local from {h}. The target host was decommissioned in January — a misconfigured cron job, not beaconing.",
+            "details": f"{h} ({ip}) → legacy-api.corp.local, {n} NXDOMAIN in 1h. IT ticket {inc} tracks the cron cleanup.",
+            "src_ip": ip, "src_host": h, "src_user": "svc_cron",
+            "dst_ip": "-", "dst_geo": "-", "dst_reputation": "-",
+            "affected_asset": h,
+            "mitre_tactic": "Command and Control", "mitre_technique": "T1071.004", "mitre_name": "Application Layer Protocol: DNS",
+            "playbook": "IR-FP-DNS: Decommissioned Host Lookups",
+            "playbook_steps": ["Confirm target hostname is decommissioned", f"Check {inc} for the cron cleanup", "Close as benign — misconfiguration"],
+            "raw_log": f"{mon_day} {t} umbrella query=legacy-api.corp.local client={ip} result=NXDOMAIN count={n}",
+            "false_positive_indicators": f"Destination is a decommissioned internal hostname — misconfigured cron on {h}, ticket {inc} open"}
+
+    return [(20, n1_health), (12, n2_scan), (12, n3_defender), (10, n4_bandwidth),
+            (8, n5_cert), (10, n6_lockout), (16, n7_vpn), (12, n8_nxdomain)]
+
+def _generate_noise_alerts(day: int, count: int, seed: int) -> list[dict]:
+    """Deterministic Tier-1 noise: same (day, count, seed) → byte-identical
+    output. Pure function — no sim_id/Mongo access; the insertion path stamps
+    simulation_id (and day, via _insert_day_pack). Every alert flows through
+    _enrich_soc_alert() at the insertion sites like authored signal."""
+    rng = random.Random(seed)
+    date = (datetime(2026, 2, 17) + timedelta(days=day)).strftime("%Y-%m-%d")
+    mon_day = (datetime(2026, 2, 17) + timedelta(days=day)).strftime("%b %d")
+    templates = _noise_templates(rng, _NOISE_POOLS, mon_day)
+    weights = [w for w, _ in templates]
+    builders = [b for _, b in templates]
+    out = []
+    for i in range(count):
+        overlay = rng.choices(builders, weights=weights, k=1)[0]()
+        t = overlay.pop("_t")
+        alert = {
+            "id": f"NOISE-2026-D{day}-{i + 1:03d}",
+            "timestamp": f"{date}T{t}Z",
+            "status": "open", "triage_status": "unreviewed", "sla_hours": 8,
+            "is_real_threat": False, "threat_type": "noise", "correct_action": "resolve",
+            "related_alerts": [], "analyst_notes": "",
+        }
+        alert.update(overlay)
+        out.append(alert)
     return out
 
 def seed_cybersecurity(cfg):
