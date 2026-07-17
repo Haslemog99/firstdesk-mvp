@@ -680,6 +680,35 @@ button{cursor:pointer}
 #sd.siem-dark-modal .sd-vpill.vd-fp{background:rgba(22,163,74,0.22);color:#86efac}
 #sd.siem-dark-modal .mitre-pill.tactic{background:rgba(99,102,241,0.25);color:#c7d2fe}
 #sd.siem-dark-modal .mitre-pill.technique{background:rgba(124,58,237,0.28);color:#d8b4fe}
+/* ── EDR tab (endpoint telemetry) ── light-on-dark, matches drawer ── */
+.edr-hdr{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:2px 0 12px}
+.edr-os{font-size:12px;color:#e2e8f0;font-weight:600}
+.edr-host{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:11px;color:#a5b4fc}
+.edr-tree{background:rgba(255,255,255,0.03);border:0.5px solid rgba(255,255,255,0.08);border-radius:8px;padding:6px 0;overflow-x:auto}
+.edr-proc{padding:6px 12px 6px 10px;border-left:2px solid transparent}
+.edr-proc.mal{border-left-color:#ef4444;background:rgba(220,38,38,0.08)}
+.edr-proc-top{display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:12px}
+.edr-dot{width:7px;height:7px;border-radius:50%;background:#ef4444;box-shadow:0 0 0 3px rgba(239,68,68,0.18);flex:0 0 auto}
+.edr-pname{font-weight:700;color:#f1f5f9;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+.edr-pid{font-size:10px;color:#94a3b8;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+.edr-puser{font-size:10px;color:#7dd3fc;background:rgba(2,132,199,0.18);padding:1px 6px;border-radius:4px}
+.edr-sign{font-size:9px;text-transform:uppercase;letter-spacing:0.04em;padding:1px 5px;border-radius:4px;font-weight:700}
+.edr-sign.ok{color:#86efac;background:rgba(22,163,74,0.18)}
+.edr-sign.bad{color:#fca5a5;background:rgba(220,38,38,0.22)}
+.edr-cmd{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:11px;color:#cbd5e1;margin-top:3px;word-break:break-all;line-height:1.4}
+.edr-proc.mal .edr-cmd{color:#fde68a}
+.edr-tblwrap{overflow-x:auto;border:0.5px solid rgba(255,255,255,0.08);border-radius:8px}
+.edr-tbl{width:100%;border-collapse:collapse;font-size:11.5px}
+.edr-tbl th{text-align:left;padding:7px 10px;font-size:9.5px;text-transform:uppercase;letter-spacing:0.05em;color:#94a3b8;background:rgba(255,255,255,0.04);border-bottom:0.5px solid rgba(255,255,255,0.08);white-space:nowrap}
+.edr-tbl td{padding:7px 10px;color:#e2e8f0;border-bottom:0.5px solid rgba(255,255,255,0.05);vertical-align:top}
+.edr-tbl td.mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:11px;color:#cbd5e1}
+.edr-dir{font-size:9.5px;font-weight:700;text-transform:uppercase;padding:1px 6px;border-radius:4px}
+.edr-dir.in{background:rgba(220,38,38,0.20);color:#fca5a5}
+.edr-dir.out{background:rgba(217,119,6,0.22);color:#fcd34d}
+.edr-fa{font-size:9.5px;font-weight:700;text-transform:uppercase;padding:1px 6px;border-radius:4px;background:rgba(255,255,255,0.08);color:#cbd5e1}
+.edr-fa.create,.edr-fa.write{background:rgba(217,119,6,0.22);color:#fcd34d}
+.edr-fa.delete{background:rgba(220,38,38,0.20);color:#fca5a5}
+.edr-actions{margin-top:14px}
 .sd-tabs{display:flex;gap:2px;border-bottom:0.5px solid rgba(0,0,0,0.10);margin:10px 0 12px}
 .sd-tab{font-size:11.5px;font-weight:600;padding:7px 14px;color:#6b7280;cursor:pointer;border-bottom:2px solid transparent;letter-spacing:0.02em;text-transform:uppercase;user-select:none;transition:color .12s}
 .sd-tab.on{color:#1c5fb5;border-bottom-color:#2563EB}
@@ -2382,6 +2411,52 @@ function _siemTimelineHTML(a){
   if(!events.length)return '<div class="sd-empty">No timeline events yet.</div>';
   return '<ul class="sd-tl">'+events.map(e=>'<li class="'+e.cls+'">'+(e.ts?'<span class="ts">'+esc(e.ts)+'</span>':'')+'<b>'+e.title+'</b>'+(e.body?'<div>'+e.body+'</div>':'')+'</li>').join('')+'</ul>';
 }
+function _edrPane(a){
+  const t=a.edr_telemetry;
+  if(!t||!(t.process_tree||[]).length){
+    return '<div class="sd-empty">No endpoint telemetry — host not under investigation.</div>';
+  }
+  const hs=(t.host_status==='contained')?'contained':'active';
+  const hsCls=hs==='contained'?'st-closed':'st-new';
+  const head='<div class="edr-hdr">'
+    +'<span class="sd-vpill '+hsCls+'" id="edrHostStatus">'+(hs==='contained'?'🔒 Contained':'● Active')+'</span>'
+    +'<span class="edr-os">'+esc(t.os||'—')+'</span>'
+    +(t.sensor?'<span class="src-pill">'+esc(t.sensor)+'</span>':'')
+    +(a.hostname?'<span class="edr-host">'+esc(a.hostname)+'</span>':'')+'</div>';
+  // Process tree — parent→child via ppid, indented, malicious branch flagged.
+  const pt=t.process_tree||[];
+  const pids={};pt.forEach(p=>{pids[p.pid]=p});
+  const kids={};pt.forEach(p=>{(kids[p.ppid]=kids[p.ppid]||[]).push(p)});
+  const roots=pt.filter(p=>!(p.ppid in pids)).sort((x,y)=>(x.start_ts||'').localeCompare(y.start_ts||''));
+  const seen={};
+  function node(p,depth){
+    if(seen[p.pid])return'';seen[p.pid]=1;
+    const mal=!!p.malicious;
+    const sign=p.signed?'<span class="edr-sign ok" title="Signed binary">signed</span>':'<span class="edr-sign bad" title="Unsigned binary">unsigned</span>';
+    const row='<div class="edr-proc'+(mal?' mal':'')+'" style="padding-left:'+(depth*20+10)+'px">'
+      +'<div class="edr-proc-top">'+(mal?'<span class="edr-dot"></span>':'')
+        +'<span class="edr-pname">'+esc(p.name||'?')+'</span>'
+        +'<span class="edr-pid">pid '+esc(p.pid)+' · ppid '+esc(p.ppid)+'</span>'
+        +'<span class="edr-puser">'+esc(p.user||'')+'</span>'+sign+'</div>'
+      +'<div class="edr-cmd">'+esc(p.cmdline||'')+'</div></div>';
+    const children=(kids[p.pid]||[]).slice().sort((x,y)=>(x.start_ts||'').localeCompare(y.start_ts||''));
+    return row+children.map(c=>node(c,depth+1)).join('');
+  }
+  const treeHTML=roots.map(r=>node(r,0)).join('')
+    +pt.filter(p=>!seen[p.pid]).map(p=>node(p,0)).join(''); // safety: any unreachable node still shown
+  const tree='<div class="sd-section"><h4>Process Tree</h4><div class="edr-tree">'+treeHTML+'</div></div>';
+  // Network events
+  const ne=t.network_events||[];
+  const net=ne.length?('<div class="sd-section"><h4>Network Events</h4><div class="edr-tblwrap"><table class="edr-tbl"><thead><tr><th>Time</th><th>Src → Dst : Port</th><th>Dir</th><th>Bytes</th><th>Proto</th></tr></thead><tbody>'
+    +ne.map(e=>'<tr><td class="mono">'+esc((e.ts||'').slice(11,19))+'</td><td class="mono">'+esc(e.src_ip||'?')+' → '+esc(e.dst_ip||'?')+':'+esc(e.dst_port||'')+'</td><td><span class="edr-dir '+(e.direction==='inbound'?'in':'out')+'">'+esc(e.direction||'')+'</span></td><td class="mono">'+esc(Number(e.bytes||0).toLocaleString())+'</td><td>'+esc(e.protocol||'')+'</td></tr>').join('')
+    +'</tbody></table></div></div>'):'';
+  // File events
+  const fe=t.file_events||[];
+  const files=fe.length?('<div class="sd-section"><h4>File Events</h4><div class="edr-tblwrap"><table class="edr-tbl"><thead><tr><th>Time</th><th>Action</th><th>Path</th><th>Process</th></tr></thead><tbody>'
+    +fe.map(e=>'<tr><td class="mono">'+esc((e.ts||'').slice(11,19))+'</td><td><span class="edr-fa '+esc(e.action||'')+'">'+esc(e.action||'')+'</span></td><td class="mono">'+esc(e.path||'')+'</td><td class="mono">'+esc(e.process||'')+'</td></tr>').join('')
+    +'</tbody></table></div></div>'):'';
+  return head+tree+net+files;
+}
 function osd(id){
   const a=_siemAlerts.find(x=>x.id===id);if(!a)return;
   // correlation highlight in main table
@@ -2439,6 +2514,9 @@ function osd(id){
     :'<div class="sd-empty">No playbook attached to this alert type.</div>';
   // Tab 4 — Timeline
   const tlPane=_siemTimelineHTML(a);
+  // Tab 5 — EDR (endpoint telemetry) — only when the alert carries it
+  const hasEdr=!!(a.edr_telemetry&&(a.edr_telemetry.process_tree||[]).length);
+  const edrPane=hasEdr?_edrPane(a):'';
   document.getElementById('sdContent').innerHTML=
     '<div class="sd-head"><h3 class="sd-rulename">'+esc(a.rule_name||a.title||'')+'</h3>'
       +'<span class="sev '+sev+'">'+esc(a.severity_label||sev)+'</span>'
@@ -2451,11 +2529,13 @@ function osd(id){
       +'<div class="sd-tab" onclick="_sdTab(this,\'log\')">Raw Log</div>'
       +'<div class="sd-tab" onclick="_sdTab(this,\'playbook\')">Playbook</div>'
       +'<div class="sd-tab" onclick="_sdTab(this,\'timeline\')">Timeline</div>'
+      +(hasEdr?'<div class="sd-tab" onclick="_sdTab(this,\'edr\')">EDR</div>':'')
     +'</div>'
     +'<div class="sd-tab-pane on" data-pane="details">'+detailsPane+'</div>'
     +'<div class="sd-tab-pane" data-pane="log">'+logPane+'</div>'
     +'<div class="sd-tab-pane" data-pane="playbook">'+pbPane+'</div>'
     +'<div class="sd-tab-pane" data-pane="timeline">'+tlPane+'</div>'
+    +(hasEdr?'<div class="sd-tab-pane" data-pane="edr">'+edrPane+'</div>':'')
     +(isResolved?'':'<div class="sd-actions">'
       +(a.owned_at?'':'<button class="sd-act invest" onclick="_doTriage(\''+esc(a.id)+'\',\'investigate\')">⌕ Take Ownership</button>')
       +'<button class="sd-act escalate" onclick="_showVerdict(\''+esc(a.id)+'\',\'escalate\')">⚠ Escalate to Tier 2</button>'
