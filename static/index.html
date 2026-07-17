@@ -709,6 +709,24 @@ button{cursor:pointer}
 .edr-fa.create,.edr-fa.write{background:rgba(217,119,6,0.22);color:#fcd34d}
 .edr-fa.delete{background:rgba(220,38,38,0.20);color:#fca5a5}
 .edr-actions{margin-top:14px}
+/* ── EDR standalone console (Endpoints tab) ── */
+.edr-console{padding:12px 14px;height:100%;overflow:auto;background:#0f1424}
+.edr-console-bar{display:flex;align-items:baseline;gap:10px;margin-bottom:12px;color:#f1f5f9}
+.edr-console-bar b{font-size:13px;letter-spacing:-0.01em}
+.edr-console-bar span{font-size:11px;color:#94a3b8}
+.edr-host-card{border:0.5px solid rgba(255,255,255,0.10);border-radius:10px;margin-bottom:12px;overflow:hidden;background:rgba(255,255,255,0.02)}
+.edr-host-head{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:10px 12px;background:rgba(255,255,255,0.03);border-bottom:0.5px solid rgba(255,255,255,0.08)}
+.edr-host-name{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:13px;font-weight:700;color:#f1f5f9}
+.edr-host-user{font-size:11px;color:#7dd3fc}
+.edr-iso-btn{margin-left:auto;background:rgba(220,38,38,0.20);color:#fca5a5;border:0.5px solid rgba(220,38,38,0.4);border-radius:7px;padding:5px 11px;font-size:11px;font-weight:600;cursor:pointer;font-family:var(--ff)}
+.edr-iso-btn:hover{background:rgba(220,38,38,0.30)}
+.edr-det{border-top:0.5px solid rgba(255,255,255,0.05)}
+.edr-det-head{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:8px 12px;cursor:pointer;transition:background .12s}
+.edr-det-head:hover{background:rgba(99,102,241,0.10)}
+.edr-det-title{font-size:12px;font-weight:600;color:#e2e8f0}
+.edr-det-meta{font-size:10px;color:#94a3b8;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+.edr-det-body{padding:0 12px 10px}
+.edr-mini-tbl{margin-top:8px;border:0.5px solid rgba(255,255,255,0.08);border-radius:8px;overflow-x:auto}
 .sd-tabs{display:flex;gap:2px;border-bottom:0.5px solid rgba(0,0,0,0.10);margin:10px 0 12px}
 .sd-tab{font-size:11.5px;font-weight:600;padding:7px 14px;color:#6b7280;cursor:pointer;border-bottom:2px solid transparent;letter-spacing:0.02em;text-transform:uppercase;user-select:none;transition:color .12s}
 .sd-tab.on{color:#1c5fb5;border-bottom-color:#2563EB}
@@ -1625,7 +1643,7 @@ document.getElementById('flagBtn').style.display='block';
 document.getElementById('flagBtn').textContent='🚩 Flag Discrepancy';
 document.getElementById('flagBtn').onclick=ofm;
 }else if(career==='cybersecurity'){
-document.getElementById('toolTabs').innerHTML='<div class="tp-tab on" onclick="loadTool(\'siem\')">Alert Queue</div><div class="tp-tab" onclick="loadTool(\'tickets\')">Cases</div>';
+document.getElementById('toolTabs').innerHTML='<div class="tp-tab on" onclick="loadTool(\'siem\')">Alert Queue</div><div class="tp-tab" onclick="loadTool(\'edr\')">Endpoints</div><div class="tp-tab" onclick="loadTool(\'tickets\')">Cases</div>';
 document.getElementById('flagBtn').style.display='block';
 document.getElementById('flagBtn').textContent='🔒 Triage Alert';
 document.getElementById('flagBtn').onclick=osm;
@@ -2257,7 +2275,7 @@ function _colLetter(i){let s='';i+=1;while(i>0){const r=(i-1)%26;s=String.fromCh
 function _sageWireCells(){const tbl=document.getElementById('toolTable');if(!tbl)return;const cellEl=document.getElementById('sgCell');const fxEl=document.getElementById('sgFxin');const cntEl=document.getElementById('sgCount');const sumEl=document.getElementById('sgSum');tbl.querySelectorAll('tbody td').forEach((td,k)=>{td.onclick=function(){tbl.querySelectorAll('td.sel').forEach(s=>s.classList.remove('sel'));td.classList.add('sel');const tr=td.parentElement;const cells=Array.from(tr.children);const colIdx=cells.indexOf(td);const rows=Array.from(tbl.querySelectorAll('tbody tr'));const rowIdx=rows.indexOf(tr);const isRn=td.classList.contains('rn');const col=isRn?'#':_colLetter(Math.max(0,colIdx-(cells[0]&&cells[0].classList.contains('rn')?1:0)));if(cellEl)cellEl.textContent=col+(rowIdx+1);if(fxEl){let v=td.textContent.trim();if(td.classList.contains('am')&&/^[£$€]/.test(v))v='=VALUE("'+v+'")';fxEl.textContent=v||'(empty)'}const sels=tbl.querySelectorAll('td.am.sel,td.sel.am');if(cntEl)cntEl.textContent=String(sels.length||1);if(sumEl){let s=0;sels.forEach(s2=>{const n=parseFloat((s2.textContent||'').replace(/[^0-9.\-]/g,''));if(!isNaN(n))s+=n});if(td.classList.contains('am')&&!sels.length){const n=parseFloat((td.textContent||'').replace(/[^0-9.\-]/g,''));if(!isNaN(n))s=n}sumEl.textContent='£'+s.toLocaleString('en-GB',{minimumFractionDigits:2,maximumFractionDigits:2})}}})}
 async function loadTool(type){if(window._lastTool&&window._lastTool!==type){try{fetch(A+'/api/track',{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+(localStorage.getItem(TKEY)||'')},body:JSON.stringify({kind:'tool_switch',ref:type})}).catch(()=>{})}catch(e){}}window._lastTool=type;ct=type;document.querySelectorAll('.tp-tab').forEach(t=>t.classList.remove('on'));if(typeof event!=='undefined'&&event&&event.target&&event.target.classList&&event.target.classList.contains('tp-tab'))event.target.classList.add('on');else{document.querySelectorAll('#toolTabs .tp-tab').forEach(el=>{if((el.getAttribute('onclick')||'').indexOf("'"+type+"'")!==-1)el.classList.add('on')})}setActionBtn();
 // If switching away from SIEM, restore the standard table layout
-if(type!=='siem'){const _ss=document.getElementById('siemSummary');if(_ss){const _body=document.querySelector('#w-tool .tp-body');if(_body)_body.innerHTML='<table class="tp-tbl" id="toolTable"></table>'}const _tp=document.querySelector('#w-tool .tp');if(_tp)_tp.classList.remove('siem-dark');}
+if(type!=='siem'&&type!=='edr'){const _ss=document.getElementById('siemSummary');if(_ss){const _body=document.querySelector('#w-tool .tp-body');if(_body)_body.innerHTML='<table class="tp-tbl" id="toolTable"></table>'}const _tp=document.querySelector('#w-tool .tp');if(_tp)_tp.classList.remove('siem-dark');}
 _applySageMode(type);
 const tbl=document.getElementById('toolTable');
 if(type==='bank'){const r=await fetch(A+'/api/spreadsheet');const d=await r.json();if(!d.bank_statement)return;tbl.innerHTML='<thead><tr><th>#</th><th>Date</th><th>Description</th><th>Debit</th><th>Credit</th><th>Balance</th></tr></thead><tbody>'+d.bank_statement.map((r,i)=>'<tr><td class="rn">'+(i+1)+'</td><td>'+r.date+'</td><td>'+r.desc+'</td><td class="am">'+(r.dr?'£'+r.dr.toLocaleString('en-GB',{minimumFractionDigits:2}):'')+'</td><td class="am">'+(r.cr?'£'+r.cr.toLocaleString('en-GB',{minimumFractionDigits:2}):'')+'</td><td class="am">£'+r.bal.toLocaleString('en-GB',{minimumFractionDigits:2})+'</td></tr>').join('')+'</tbody>'}
@@ -2268,6 +2286,7 @@ else if(type==='bs'){const r=await fetch(A+'/api/spreadsheet');const d=await r.j
 else if(type==='journals'){const r=await fetch(A+'/api/spreadsheet');const d=await r.json();const js=d.journal_entries||[];const fmt=v=>v?'£'+Number(v).toLocaleString('en-GB',{minimumFractionDigits:2}):'';if(!js.length){tbl.innerHTML='<thead><tr><th>Journal Entries</th></tr></thead><tbody><tr><td style="text-align:center;color:#999;padding:20px">No journal entries.</td></tr></tbody>';return}let html='<thead><tr><th>Journal</th><th>Date</th><th>Account</th><th>Narrative</th><th>Debit</th><th>Credit</th><th>Status</th></tr></thead><tbody>';js.forEach(j=>{const lines=j.lines||[];const flagged=j.status==='flagged';lines.forEach((ln,idx)=>{html+='<tr'+(idx===0?' style="border-top:2px solid #d1d5db"':'')+(flagged?' style="background:#fef9c3"':'')+'>'+'<td class="mono">'+(idx===0?'<b>'+esc(j.id||'')+'</b>'+(j.ref?'<div style="font-size:9.5px;color:#71717a">'+esc(j.ref)+'</div>':''):'')+'</td>'+'<td>'+(idx===0?esc(j.date||''):'')+'</td>'+'<td class="mono">'+esc(ln.acc||'')+(ln.name?' <span style="color:#71717a">'+esc(ln.name)+'</span>':'')+'</td>'+'<td>'+(idx===0?esc(j.narrative||j.narration||'')+(j.note?'<div style="font-size:10px;color:#b45309;font-style:italic">⚠ '+esc(j.note)+'</div>':''):'')+'</td>'+'<td class="am">'+fmt(ln.dr||0)+'</td>'+'<td class="am">'+fmt(ln.cr||0)+'</td>'+'<td>'+(idx===0?(flagged?'<span class="sev HIGH" style="font-size:9.5px">FLAGGED</span>':esc(j.status||'posted')):'')+'</td>'+'</tr>'})});html+='</tbody>';tbl.innerHTML=html}
 else if(type==='invoices'){const r=await fetch(A+'/api/invoices');const d=await r.json();tbl.innerHTML='<thead><tr><th>Invoice</th><th>Client</th><th>Amount</th><th>PO</th><th>PO Amt</th><th>Status</th><th></th></tr></thead><tbody>'+d.invoices.map(i=>'<tr'+(i.status==='queried'?' style="background:#fff3cd"':'')+'><td>'+i.id+'</td><td>'+i.client+'</td><td class="am">£'+i.amount.toLocaleString('en-GB',{minimumFractionDigits:2})+'</td><td>'+(i.po||'')+'</td><td class="am">'+(i.po_amount?'£'+i.po_amount.toLocaleString('en-GB',{minimumFractionDigits:2}):'')+'</td><td>'+(i.status==='queried'?'⚠️ QUERIED':i.status)+'</td><td>'+(i.status==='queried'?'<button onclick="oivm(\''+i.id+'\')" style="background:#0078d4;color:#fff;border:0;padding:3px 8px;border-radius:3px;font-size:10px;cursor:pointer">Resolve</button>':'')+'</td></tr>').join('')+'</tbody>'}
 else if(type==='siem'){const r=await fetch(A+'/api/siem');const d=await r.json();renderSiem(d.alerts||[]);return}
+else if(type==='edr'){const r=await fetch(A+'/api/edr');const d=await r.json();renderEdr(d.hosts||[]);return}
 else if(type==='tickets'){const r=await fetch(A+'/api/jira');const d=await r.json();tbl.innerHTML='<thead><tr><th>ID</th><th>Type</th><th>Priority</th><th>Title</th><th>Assignee</th><th>Status</th><th>Source Alert</th><th></th></tr></thead><tbody>'+(d.tickets.length?d.tickets.map(t=>'<tr style="cursor:pointer" onclick="ojum(\''+t.id+'\')"><td><b>'+t.id+'</b></td><td>'+(t.type||'')+'</td><td><span class="sev '+(t.priority||'MEDIUM')+'">'+(t.priority||'')+'</span></td><td>'+t.title+'</td><td>'+(t.assignee||'')+'</td><td>'+t.status+'</td><td>'+(t.source_alert||'—')+'</td><td><button onclick="event.stopPropagation();ojum(\''+t.id+'\')" style="background:#0078d4;color:#fff;border:0;padding:3px 8px;border-radius:3px;font-size:10px;cursor:pointer">Update</button></td></tr>').join(''):'<tr><td colspan="8" style="text-align:center;color:#999;padding:20px">No cases yet — escalating an alert from the queue opens a case.</td></tr>')+'</tbody>'}
 else if(type==='jira'){const r=await fetch(A+'/api/jira');const d=await r.json();_jiraTickets=d.tickets||[];renderJira(_jiraTickets)}
 else if(type==='campaigns'){const r=await fetch(A+'/api/campaigns');const d=await r.json();_campaigns=d.campaigns||[];renderCampaigns(_campaigns)}
@@ -2388,6 +2407,67 @@ function renderSiem(alerts){
     +'<div style="overflow:auto;max-height:calc(100% - 40px)"><table class="siem-tbl" id="toolTable"><thead><tr>'
     +'<th>ID</th><th style="cursor:pointer" onclick="_siemSortBy(\'time\')" title="Sort by time">'+_bgTip('alerts','TIME','Time')+_arr('time')+'</th><th style="cursor:pointer" onclick="_siemSortBy(\'sev\')" title="Sort by severity">'+_bgTip('alerts','SEV','Sev')+_arr('sev')+'</th><th>Conf</th><th>'+_bgTip('alerts','SOURCE','Source')+'</th><th>'+_bgTip('alerts','TITLE','Title')+'</th><th>Src → Dst</th><th>Asset</th><th>MITRE</th><th>SLA</th><th>'+_bgTip('alerts','STATUS','Status')+'</th>'
     +'</tr></thead><tbody>'+(rows||'<tr><td colspan="11" style="text-align:center;color:#999;padding:20px">No alerts</td></tr>')+'</tbody></table></div>';
+}
+// ── EDR console: host-centric endpoint telemetry (standalone tab) ──
+function _edrProcTreeHTML(t){
+  const pt=t.process_tree||[];const pids={};pt.forEach(p=>{pids[p.pid]=p});
+  const kids={};pt.forEach(p=>{(kids[p.ppid]=kids[p.ppid]||[]).push(p)});
+  const roots=pt.filter(p=>!(p.ppid in pids)).sort((x,y)=>(x.start_ts||'').localeCompare(y.start_ts||''));
+  const seen={};
+  function node(p,depth){
+    if(seen[p.pid])return'';seen[p.pid]=1;
+    const mal=!!p.malicious;
+    const sign=p.signed?'<span class="edr-sign ok">signed</span>':'<span class="edr-sign bad">unsigned</span>';
+    const row='<div class="edr-proc'+(mal?' mal':'')+'" style="padding-left:'+(depth*20+10)+'px"><div class="edr-proc-top">'+(mal?'<span class="edr-dot"></span>':'')
+      +'<span class="edr-pname">'+esc(p.name||'?')+'</span><span class="edr-pid">pid '+esc(p.pid)+' · ppid '+esc(p.ppid)+'</span><span class="edr-puser">'+esc(p.user||'')+'</span>'+sign+'</div>'
+      +'<div class="edr-cmd">'+esc(p.cmdline||'')+'</div></div>';
+    return row+(kids[p.pid]||[]).slice().sort((x,y)=>(x.start_ts||'').localeCompare(y.start_ts||'')).map(c=>node(c,depth+1)).join('');
+  }
+  let html=roots.map(r=>node(r,0)).join('')+pt.filter(p=>!seen[p.pid]).map(p=>node(p,0)).join('');
+  const ne=t.network_events||[],fe=t.file_events||[];
+  if(ne.length)html+='<div class="edr-mini-tbl"><table class="edr-tbl"><thead><tr><th>Time</th><th>Src → Dst : Port</th><th>Dir</th><th>Bytes</th><th>Proto</th></tr></thead><tbody>'+ne.map(e=>'<tr><td class="mono">'+esc((e.ts||'').slice(11,19))+'</td><td class="mono">'+esc(e.src_ip||'?')+' → '+esc(e.dst_ip||'?')+':'+esc(e.dst_port||'')+'</td><td><span class="edr-dir '+(e.direction==='inbound'?'in':'out')+'">'+esc(e.direction||'')+'</span></td><td class="mono">'+esc(Number(e.bytes||0).toLocaleString())+'</td><td>'+esc(e.protocol||'')+'</td></tr>').join('')+'</tbody></table></div>';
+  if(fe.length)html+='<div class="edr-mini-tbl"><table class="edr-tbl"><thead><tr><th>Time</th><th>Action</th><th>Path</th><th>Process</th></tr></thead><tbody>'+fe.map(e=>'<tr><td class="mono">'+esc((e.ts||'').slice(11,19))+'</td><td><span class="edr-fa '+esc(e.action||'')+'">'+esc(e.action||'')+'</span></td><td class="mono">'+esc(e.path||'')+'</td><td class="mono">'+esc(e.process||'')+'</td></tr>').join('')+'</tbody></table></div>';
+  return html;
+}
+function renderEdr(hosts){
+  const tp=document.querySelector('#w-tool .tp');if(tp)tp.classList.add('siem-dark');
+  const body=document.querySelector('#w-tool .tp-body');if(!body)return;
+  if(!hosts.length){body.innerHTML='<div class="edr-console"><div class="sd-empty" style="margin-top:40px">No endpoints under investigation. Endpoint telemetry appears here when a signal alert involves a host with EDR/XDR coverage.</div></div>';return}
+  const totDet=hosts.reduce((n,h)=>n+h.detections.length,0);
+  let html='<div class="edr-console"><div class="edr-console-bar"><b>Endpoint Detection &amp; Response</b><span>'+hosts.length+' host'+(hosts.length===1?'':'s')+' · '+totDet+' detection'+(totDet===1?'':'s')+'</span></div>';
+  hosts.forEach(h=>{
+    const contained=h.host_status==='contained';
+    const worst=(h.detections.map(d=>(d.severity||'').toUpperCase()).sort((a,b)=>_SEV_RANK[a]-_SEV_RANK[b])[0])||'LOW';
+    html+='<div class="edr-host-card">'
+      +'<div class="edr-host-head"><span class="sev '+worst+'">'+esc(worst)+'</span>'
+        +'<span class="edr-host-name">'+esc(h.hostname)+'</span>'
+        +'<span class="sd-vpill '+(contained?'st-closed':'st-new')+'">'+(contained?'🔒 Contained':'● Active')+'</span>'
+        +(h.os?'<span class="edr-os">'+esc(h.os)+'</span>':'')+(h.sensor?'<span class="src-pill">'+esc(h.sensor)+'</span>':'')
+        +(h.affected_users&&h.affected_users.length?'<span class="edr-host-user">'+esc(h.affected_users.join(', '))+'</span>':'')
+        +(contained?'':'<button class="edr-iso-btn" onclick="_containHostConsole(\''+esc(h.detections[0].id)+'\',\''+esc(h.hostname)+'\')">🔒 Isolate</button>')
+        +'</div>';
+    h.detections.forEach(d=>{
+      html+='<div class="edr-det"><div class="edr-det-head" onclick="osd(\''+esc(d.id)+'\')" title="Open full alert">'
+        +'<span class="sev '+((d.severity||'LOW').toUpperCase())+'">'+esc(d.severity_label||d.severity||'')+'</span>'
+        +'<span class="edr-det-title">'+esc(d.rule_name||d.title||d.id)+'</span>'
+        +'<span class="edr-det-meta">'+esc(d.alert_id||d.id)+' · '+esc((d.event_time||'').replace('T',' ').replace('Z',''))+(d.day?' · Day '+d.day:'')+'</span>'
+        +(d.verdict?'<span class="sd-vpill vd-'+(d.verdict==='True Positive'?'tp':'fp')+'">'+esc(d.verdict)+'</span>':'')+'</div>'
+        +'<div class="edr-det-body">'+_edrProcTreeHTML(d.edr_telemetry)+'</div></div>';
+    });
+    html+='</div>';
+  });
+  html+='</div>';
+  body.innerHTML=html;
+}
+async function _containHostConsole(alertId,hostname){
+  if(!confirm('Isolate '+hostname+' from the network? Simulates cutting the endpoint off to stop an active compromise.'))return;
+  try{
+    const d=await api.post('/api/siem/'+alertId+'/contain',{});
+    toast('🔒 '+(d.hostname||hostname)+' isolated from the network','success');
+    (d.effects||[]).forEach((ef,ix)=>setTimeout(()=>showPhysicsToast(ef),400+ix*700));
+    if(d.effects&&d.effects.length&&typeof _refreshAfterPhysics==='function')_refreshAfterPhysics(d.effects);
+    loadTool('edr');
+  }catch(e){toast('Isolate failed: '+((e&&e.message)||''),'error')}
 }
 function _sdTab(el,name){
   const root=el.closest('#sdContent');if(!root)return;

@@ -4855,6 +4855,57 @@ async def api_siem_contain(alert_id: str):
     return {"ok": True, "host_status": "contained", "contained_at": now_iso,
             "hostname": hostname, "effects": physics_effects}
 
+@app.get("/api/edr")
+async def api_edr():
+    """Host-centric EDR console. Aggregates every day-visible alert that
+    carries edr_telemetry, grouped by hostname (a host can have several
+    detections across days). Read-only view over the same siem_col docs —
+    no new collection, mirrors /api/siem's day-gating."""
+    _day = _current_day()
+    rows = list(siem_col.find(
+        {"simulation_id": sim_id(), "day": {"$lte": _day},
+         "edr_telemetry.process_tree.0": {"$exists": True}},
+        {"_id": 0}))
+    hosts: dict[str, dict] = {}
+    for a in rows:
+        t = a.get("edr_telemetry") or {}
+        hn = a.get("hostname") or "unknown"
+        h = hosts.get(hn)
+        if not h:
+            h = hosts[hn] = {
+                "hostname": hn, "os": t.get("os"), "sensor": t.get("sensor"),
+                "host_status": t.get("host_status", "active"),
+                "affected_users": [], "detections": [],
+                "proc_count": 0, "net_count": 0, "file_count": 0,
+            }
+        # contained state is sticky per host (any contained detection => contained)
+        if t.get("host_status") == "contained":
+            h["host_status"] = "contained"
+        au = a.get("affected_user")
+        if au and au not in h["affected_users"]:
+            h["affected_users"].append(au)
+        h["proc_count"] += len(t.get("process_tree") or [])
+        h["net_count"] += len(t.get("network_events") or [])
+        h["file_count"] += len(t.get("file_events") or [])
+        h["detections"].append({
+            "id": a.get("id"), "alert_id": a.get("alert_id"),
+            "title": a.get("title"), "rule_name": a.get("rule_name"),
+            "severity": a.get("severity"), "severity_label": a.get("severity_label"),
+            "event_time": a.get("event_time") or a.get("timestamp"),
+            "status": a.get("status", "open"), "verdict": a.get("verdict"),
+            "day": a.get("day"),
+            "edr_telemetry": t,
+        })
+    # sort detections chronologically within a host; hosts by worst severity then name
+    _rank = {"CRITICAL": 0, "HIGH": 1, "MEDIUM": 2, "LOW": 3}
+    for h in hosts.values():
+        h["detections"].sort(key=lambda d: d.get("event_time") or "")
+    ordered = sorted(hosts.values(),
+                     key=lambda h: (min((_rank.get((d["severity"] or "").upper(), 4) for d in h["detections"]), default=4),
+                                    h["hostname"]))
+    return {"hosts": ordered, "host_count": len(ordered),
+            "detection_count": sum(len(h["detections"]) for h in ordered)}
+
 @app.get("/api/jira")
 async def api_jira():
     _day = _current_day()
