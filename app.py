@@ -5327,6 +5327,51 @@ async def api_edr():
     return {"hosts": ordered, "host_count": len(ordered),
             "detection_count": sum(len(h["detections"]) for h in ordered)}
 
+# ── ComplianceHub read ────────────────────────────────────────────
+# Ground-truth keys that must NEVER reach the client (students could read
+# the answers straight from the API otherwise). Stripped from every
+# evidence item before /api/grc returns.
+_GRC_GT_KEYS = ("is_flawed", "flaw_type", "correct_verdict", "correct_reject_reason",
+                "points_correct", "points_wrong", "pending_exception_day")
+
+def _grc_public_control(doc: dict, current_day: int) -> dict:
+    """Client-safe copy of a control: recompute due_soon against the live
+    sim-day, and strip ground truth from every nested evidence item."""
+    c = {k: v for k, v in doc.items() if k != "_id"}
+    edd = c.get("evidence_due_day")
+    # Only awaiting controls float between needs_evidence/due_soon; failing
+    # and passing are terminal states the overlay must not touch.
+    if c.get("status") in ("needs_evidence", "due_soon") and edd is not None:
+        c["status"] = "due_soon" if (edd - current_day) <= 2 else "needs_evidence"
+    c["evidence_items"] = [{k: v for k, v in ev.items() if k not in _GRC_GT_KEYS}
+                           for ev in c.get("evidence_items", [])]
+    return c
+
+def _grc_readiness(controls: list[dict]) -> int:
+    """(passing controls + accepted evidence) / (total controls + total evidence)."""
+    ev = [e for c in controls for e in c.get("evidence_items", [])]
+    passing = sum(1 for c in controls if c.get("status") == "passing")
+    accepted = sum(1 for e in ev if e.get("status") == "accepted")
+    denom = len(controls) + len(ev)
+    return round(100 * (passing + accepted) / denom) if denom else 0
+
+@app.get("/api/grc")
+async def api_grc():
+    cur = _current_day()
+    docs = list(grc_col.find({"simulation_id": sim_id(), "day": {"$lte": cur}}, {"_id": 0}))
+    controls = [_grc_public_control(d, cur) for d in docs if d.get("doc_type") == "control"]
+    pbc = [d for d in docs if d.get("doc_type") == "pbc"]
+    meta = next((d for d in docs if d.get("doc_type") == "audit_meta"), {})
+    return {
+        "controls": controls,
+        "pbc_items": pbc,
+        "audit": {
+            "days_to_fieldwork": (meta.get("fieldwork_start_day", 0) - cur),
+            "readiness_pct": _grc_readiness(controls),
+            **{k: meta.get(k) for k in ("audit_name", "automated_tests_total", "automated_tests_passing", "pbc_hidden_count")},
+        },
+    }
+
 @app.get("/api/jira")
 async def api_jira():
     _day = _current_day()
