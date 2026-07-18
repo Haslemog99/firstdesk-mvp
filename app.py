@@ -120,6 +120,11 @@ tools_col = db["tools"]
 interviews_col = db["interviews"]
 # Analytics — append-only event log (user_registered, simulation_started, etc.).
 analytics_col = db["analytics"]
+# ComplianceHub (GRC) — one doc per control / pbc / audit_meta, type-tagged.
+# Mirrors siem_col exactly: stamped simulation_id + day, day-gated on read,
+# ground-truth on the doc and stripped before the client sees it. Evidence
+# items are nested on their control (the edr_telemetry pattern).
+grc_col = db["grc_controls"]
 
 # Indexes + demo seed created lazily on first request to avoid hard-failing module import when Mongo is down.
 _bootstrap_done = False
@@ -136,7 +141,7 @@ def _ensure_bootstrap():
         for _c in (emails_col, tasks_col, evals_col, siem_col, jira_col,
                    campaigns_col, invoices_col, slack_col, tools_col,
                    reputation_col, agent_comms_col, system_events_col,
-                   sheets_col, interviews_col, user_scenarios_col):
+                   sheets_col, interviews_col, user_scenarios_col, grc_col):
             try: _c.create_index("simulation_id")
             except Exception: pass
         try:
@@ -2541,6 +2546,179 @@ def seed_grc(cfg):
         {"id":"t9","simulation_id":sim_id(),"title":"Re-assess RSK-205 — expired vendor review","description":"Move from 'monitoring' back to 'assessing'. Request the vendor's current SOC 2 report, re-score once you have current evidence.","priority":"medium","deadline":"tomorrow","status":"pending","points":15},
     ])
     _seed_grc_artifacts(cfg)
+    _seed_grc_compliancehub(cfg)
+
+# ══════════════════════════════════════════════════════════════════
+# ComplianceHub (GRC bespoke tool) — grc_col docs. Additive to the GRC
+# career: seeds controls + nested evidence + PBC + audit_meta. Authored
+# signal only (no volume layer yet). Coworker cast for owners/approvers:
+# Marcus Vale, Priya Nair, Sam Osei, Dana Whitfield, Alex Chen (auditor).
+# Flaws are authored INTO the artifact data — never stated in metadata.
+# ══════════════════════════════════════════════════════════════════
+
+def _grc_controls_seed() -> list[dict]:
+    """The 10 authored controls (5 passing, 2 failing, 3 needs_evidence).
+    The 3 needs_evidence controls carry the 6 authored evidence items —
+    3 clean, 3 flawed, one flaw visible in each flawed artifact."""
+    return [
+        # ── 5 PASSING (no open evidence) ──────────────────────────
+        {"doc_type":"control","control_id":"CM-01","title":"Change Approval Workflow",
+         "description":"All production changes are peer-reviewed and approved via pull request before deploy; emergency changes are retroactively approved within 24 hours.",
+         "framework_refs":["SOC 2 CC8.1"],"owner":"Sam Osei","owner_role":"Platform Engineer","frequency":"Continuous",
+         "status":"passing","last_tested":"2026-02-02","evidence_due_day":None,
+         "in_scope_systems":["GitHub","AWS Production"],
+         "test_history":[{"period":"Q1","result":"pass"},{"period":"Q2","result":"pass"},{"period":"Q3","result":"pass"}],
+         "evidence_items":[]},
+        {"doc_type":"control","control_id":"EN-01","title":"Encryption of Data at Rest",
+         "description":"All customer and patient data is encrypted at rest using AES-256 with keys managed in AWS KMS; key rotation is automated annually.",
+         "framework_refs":["SOC 2 CC6.7","ISO 27001 A.8.24"],"owner":"Sam Osei","owner_role":"Platform Engineer","frequency":"Annual",
+         "status":"passing","last_tested":"2026-01-22","evidence_due_day":None,
+         "in_scope_systems":["AWS RDS","AWS S3","AWS KMS"],
+         "test_history":[{"period":"Q1","result":"pass"},{"period":"Q2","result":"pass"},{"period":"Q3","result":"pass"}],
+         "evidence_items":[]},
+        {"doc_type":"control","control_id":"MON-01","title":"Security Monitoring & Alerting",
+         "description":"Security-relevant events are logged centrally and alert on-call within 15 minutes; alerts are triaged and dispositioned.",
+         "framework_refs":["SOC 2 CC7.2"],"owner":"Sam Osei","owner_role":"Platform Engineer","frequency":"Continuous",
+         "status":"passing","last_tested":"2026-02-10","evidence_due_day":None,
+         "in_scope_systems":["CloudTrail","SIEM","PagerDuty"],
+         "test_history":[{"period":"Q1","result":"pass"},{"period":"Q2","result":"pass"},{"period":"Q3","result":"pass"}],
+         "evidence_items":[]},
+        {"doc_type":"control","control_id":"BUR-01","title":"Backup & Recovery Testing",
+         "description":"Automated daily backups of production databases; a restore test is performed and documented each quarter.",
+         "framework_refs":["SOC 2 CC7.5","ISO 27001 A.8.13"],"owner":"Sam Osei","owner_role":"Platform Engineer","frequency":"Quarterly",
+         "status":"passing","last_tested":"2026-01-30","evidence_due_day":None,
+         "in_scope_systems":["AWS RDS","AWS Backup"],
+         "test_history":[{"period":"Q1","result":"pass"},{"period":"Q2","result":"pass"},{"period":"Q3","result":"pass"}],
+         "evidence_items":[]},
+        {"doc_type":"control","control_id":"VUL-01","title":"Vulnerability Management",
+         "description":"Infrastructure and dependencies are scanned weekly; critical vulnerabilities are remediated within 30 days.",
+         "framework_refs":["SOC 2 CC7.1","ISO 27001 A.8.8"],"owner":"Sam Osei","owner_role":"Platform Engineer","frequency":"Weekly",
+         "status":"passing","last_tested":"2026-02-09","evidence_due_day":None,
+         "in_scope_systems":["Snyk","AWS Inspector"],
+         "test_history":[{"period":"Q1","result":"pass"},{"period":"Q2","result":"pass"},{"period":"Q3","result":"pass"}],
+         "evidence_items":[]},
+        # ── 2 FAILING ─────────────────────────────────────────────
+        {"doc_type":"control","control_id":"AC-01","title":"MFA Enforcement on Privileged Accounts",
+         "description":"Multi-factor authentication is enforced for all administrative and production access. No admin account may bypass MFA.",
+         "framework_refs":["SOC 2 CC6.1","SOC 2 CC6.6"],"owner":"Marcus Vale","owner_role":"Engineering Manager","frequency":"Continuous",
+         "status":"failing","last_tested":"2026-01-28","evidence_due_day":4,
+         "in_scope_systems":["Okta","AWS IAM"],
+         "test_history":[{"period":"Q1","result":"pass"},{"period":"Q2","result":"pass"},{"period":"Q3","result":"fail"}],
+         "evidence_items":[]},
+        {"doc_type":"control","control_id":"HR-03","title":"Security Awareness Training",
+         "description":"All staff complete annual security awareness training; completion is tracked and non-completers are escalated to managers.",
+         "framework_refs":["SOC 2 CC1.4","ISO 27001 A.6.3"],"owner":"Priya Nair","owner_role":"People Operations","frequency":"Annual",
+         "status":"failing","last_tested":"2026-01-28","evidence_due_day":5,
+         "in_scope_systems":["LMS"],
+         "test_history":[{"period":"Q1","result":"pass"},{"period":"Q2","result":"pass"},{"period":"Q3","result":"fail"}],
+         "evidence_items":[]},
+        # ── 3 NEEDS_EVIDENCE (carry the 6 authored evidence items) ─
+        {"doc_type":"control","control_id":"AC-02","title":"User Access Reviews",
+         "description":"Access to production systems is reviewed quarterly by system owners; inappropriate access is removed within 5 business days.",
+         "framework_refs":["SOC 2 CC6.1","SOC 2 CC6.2","ISO 27001 A.5.15"],"owner":"Marcus Vale","owner_role":"Engineering Manager","frequency":"Quarterly",
+         "status":"needs_evidence","last_tested":"2026-01-14","evidence_due_day":3,
+         "in_scope_systems":["AWS Production","PostgreSQL","Okta"],
+         "test_history":[{"period":"Q1","result":"pass"},{"period":"Q2","result":"pass"},{"period":"Q3","result":"not_performed"}],
+         "evidence_items":[
+            # FLAWED — wrong_period: every review_date is JUNE (Q2). Request is Q3 (Jul 1–Sep 30). Nothing states it.
+            {"ev_id":"EV-0041","label":"Q3 Access Review export","submitted_by":"Marcus Vale","submitted_day":1,
+             "artifact_type":"export","status":"awaiting_review",
+             "artifact":{"type":"export","filename":"access_review_export.csv",
+                "columns":["username","role","system","last_login","reviewed_by","review_date"],
+                "rows":[
+                    ["m.vale","admin","AWS Production","2025-06-28","M. Vale","2025-06-30"],
+                    ["s.osei","developer","AWS Production","2025-06-25","M. Vale","2025-06-30"],
+                    ["l.okoro","developer","AWS Production","2025-06-12","M. Vale","2025-06-30"],
+                    ["p.nair","read-only","PostgreSQL","2025-06-29","M. Vale","2025-06-30"],
+                    ["j.smith","developer","AWS Production","2025-06-27","M. Vale","2025-06-30"]]},
+             "is_flawed":True,"flaw_type":"wrong_period","correct_verdict":"reject","correct_reject_reason":"wrong_period","points_correct":15,"points_wrong":-20},
+            # CLEAN — dates are Q3 (Jul–Sep), reviewed_by present, review_date within period.
+            {"ev_id":"EV-0044","label":"Q3 Access Review export (corrected)","submitted_by":"Marcus Vale","submitted_day":1,
+             "artifact_type":"export","status":"awaiting_review",
+             "artifact":{"type":"export","filename":"access_review_q3_final.csv",
+                "columns":["username","role","system","last_login","reviewed_by","review_date"],
+                "rows":[
+                    ["m.vale","admin","AWS Production","2025-09-24","M. Vale","2025-09-30"],
+                    ["s.osei","developer","AWS Production","2025-09-27","M. Vale","2025-09-30"],
+                    ["l.okoro","developer","AWS Production","2025-08-30","M. Vale","2025-09-30"],
+                    ["p.nair","read-only","PostgreSQL","2025-09-19","M. Vale","2025-09-30"],
+                    ["j.smith","developer","AWS Production","2025-09-29","M. Vale","2025-09-30"]]},
+             "is_flawed":False,"flaw_type":"none","correct_verdict":"accept","correct_reject_reason":None,"points_correct":15,"points_wrong":-20},
+         ]},
+        {"doc_type":"control","control_id":"CFG-01","title":"MFA Configuration Evidence",
+         "description":"Configuration evidence demonstrating MFA sign-on policy is enforced for administrators in the identity provider.",
+         "framework_refs":["SOC 2 CC6.1","SOC 2 CC6.6"],"owner":"Sam Osei","owner_role":"Platform Engineer","frequency":"Quarterly",
+         "status":"needs_evidence","last_tested":"2026-01-20","evidence_due_day":4,
+         "in_scope_systems":["Okta"],
+         "test_history":[{"period":"Q1","result":"pass"},{"period":"Q2","result":"pass"},{"period":"Q3","result":"not_performed"}],
+         "evidence_items":[
+            # FLAWED — insufficient_source: cropped screenshot, no URL bar / timestamp / logged-in user context.
+            {"ev_id":"EV-0042","label":"Okta MFA policy screenshot","submitted_by":"Sam Osei","submitted_day":1,
+             "artifact_type":"screenshot","status":"awaiting_review",
+             "artifact":{"type":"screenshot","system":"Okta Admin Console","url_bar":None,"captured_at":None,"logged_in_as":None,
+                "page_title":"Sign-On Policies","content_lines":["MFA: Required","Applies to: Admins"]},
+             "is_flawed":True,"flaw_type":"insufficient_source","correct_verdict":"reject","correct_reject_reason":"insufficient_source","points_correct":15,"points_wrong":-20},
+            # CLEAN — full context: URL bar, capture timestamp, logged-in super admin, full policy detail.
+            {"ev_id":"EV-0045","label":"Okta MFA policy screenshot (full)","submitted_by":"Sam Osei","submitted_day":1,
+             "artifact_type":"screenshot","status":"awaiting_review",
+             "artifact":{"type":"screenshot","system":"Okta Admin Console","url_bar":"admin.okta.com/policies/sign-on",
+                "captured_at":"2026-02-17 09:41 UTC","logged_in_as":"s.osei (Super Admin)",
+                "page_title":"Sign-On Policies — Admin MFA","content_lines":["MFA: Required for all admins","Factor: Okta Verify / WebAuthn","Applies to: Administrators group (12 users)","Status: Active","Last modified: 2026-01-20 by s.osei"]},
+             "is_flawed":False,"flaw_type":"none","correct_verdict":"accept","correct_reject_reason":None,"points_correct":15,"points_wrong":-20},
+         ]},
+        {"doc_type":"control","control_id":"GV-01","title":"Governance — Policy & Change Approvals",
+         "description":"Security policies are reviewed and formally approved annually; governed changes carry an independent approver.",
+         "framework_refs":["SOC 2 CC1.4","ISO 27001 A.5.1"],"owner":"Priya Nair","owner_role":"People Operations","frequency":"Annual",
+         "status":"needs_evidence","last_tested":"2025-12-15","evidence_due_day":3,
+         "in_scope_systems":["Policy Portal","GitHub"],
+         "test_history":[{"period":"Q1","result":"pass"},{"period":"Q2","result":"pass"},{"period":"Q3","result":"not_performed"}],
+         "evidence_items":[
+            # FLAWED — missing_approver: policy PDF with an EMPTY approval block (no approver, no date).
+            {"ev_id":"EV-0043","label":"Information Security Policy v3.2","submitted_by":"Priya Nair","submitted_day":1,
+             "artifact_type":"pdf","status":"awaiting_review",
+             "artifact":{"type":"pdf","title":"Information Security Policy","version":"3.2",
+                "body_preview":["1. Purpose — establish the framework for protecting company and patient information.","2. Scope — all employees, contractors, and systems that process regulated data.","3. Access Control — least-privilege access, reviewed quarterly, MFA enforced."],
+                "approval_block":{"approved_by":"","approval_date":"","next_review":"2026-09-01"}},
+             "is_flawed":True,"flaw_type":"missing_approver","correct_verdict":"reject","correct_reject_reason":"missing_approver","points_correct":15,"points_wrong":-20},
+            # CLEAN — change ticket with an independent approver, timestamp, and full trail.
+            {"ev_id":"EV-0046","label":"Change approval — DB credential rotation","submitted_by":"Sam Osei","submitted_day":1,
+             "artifact_type":"ticket","status":"awaiting_review",
+             "artifact":{"type":"ticket","ticket_id":"CHG-2417","title":"Rotate production DB credentials",
+                "requested_by":"s.osei","approved_by":"d.whitfield","approved_at":"2026-02-11 14:02","status":"Deployed",
+                "trail":["Created 10 Feb by s.osei","Approved 11 Feb by d.whitfield","Deployed 12 Feb"]},
+             "is_flawed":False,"flaw_type":"none","correct_verdict":"accept","correct_reject_reason":None,"points_correct":15,"points_wrong":-20},
+         ]},
+    ]
+
+def _grc_pbc_seed() -> list[dict]:
+    """8 authored Provided-By-Client (PBC) items for the Audit Hub."""
+    return [
+        {"doc_type":"pbc","pbc_id":"PBC-003","request":"Information Security Policy with documented annual approval","control_ids":["GV-01"],"due_day":2,"status":"requested","chase_state":1,"chase_log":[{"day":1,"action":"requested"}],"owner":"Priya Nair"},
+        {"doc_type":"pbc","pbc_id":"PBC-007","request":"Q3+Q4 access reviews with reviewer sign-off","control_ids":["AC-02"],"due_day":3,"status":"chasing","chase_state":2,"chase_log":[{"day":1,"action":"requested"},{"day":1,"action":"reminded"}],"owner":"Marcus Vale"},
+        {"doc_type":"pbc","pbc_id":"PBC-009","request":"Q4 vulnerability scan report with remediation status","control_ids":["VUL-01"],"due_day":5,"status":"received","chase_state":1,"chase_log":[{"day":1,"action":"requested"}],"owner":"Sam Osei"},
+        {"doc_type":"pbc","pbc_id":"PBC-011","request":"Okta MFA enforcement screenshot for admin group","control_ids":["AC-01","CFG-01"],"due_day":4,"status":"under_review","chase_state":1,"chase_log":[{"day":1,"action":"requested"}],"owner":"Sam Osei"},
+        {"doc_type":"pbc","pbc_id":"PBC-015","request":"25 sampled change tickets with approval trail","control_ids":["CM-01"],"due_day":8,"status":"submitted","chase_state":1,"chase_log":[{"day":1,"action":"requested"}],"owner":"Sam Osei"},
+        {"doc_type":"pbc","pbc_id":"PBC-019","request":"Termination sample — access revocation evidence for 5 selected leavers","control_ids":["AC-02","HR-03"],"due_day":6,"status":"not_started","chase_state":0,"chase_log":[],"owner":"Priya Nair"},
+        {"doc_type":"pbc","pbc_id":"PBC-022","request":"Encryption-at-rest configuration export (KMS)","control_ids":["EN-01"],"due_day":7,"status":"submitted","chase_state":1,"chase_log":[{"day":1,"action":"requested"}],"owner":"Sam Osei"},
+        {"doc_type":"pbc","pbc_id":"PBC-030","request":"Security awareness training completion report (all staff)","control_ids":["HR-03"],"due_day":4,"status":"chasing","chase_state":2,"chase_log":[{"day":1,"action":"requested"},{"day":1,"action":"reminded"}],"owner":"Priya Nair"},
+    ]
+
+def _grc_audit_meta_seed() -> dict:
+    return {"doc_type":"audit_meta","audit_name":"SOC 2 Type II","fieldwork_start_day":6,
+            "automated_tests_total":1247,"automated_tests_passing":1198,"pbc_hidden_count":34}
+
+def _seed_grc_compliancehub(cfg):
+    """Seed grc_col for the ComplianceHub tool. Idempotent per simulation_id.
+    Stamps simulation_id + day:1 inline (Step 1); Step 2 routes through
+    _enrich_grc_control() for validation. Authored signal only."""
+    _sim = sim_id()
+    if grc_col.find_one({"simulation_id": _sim}, {"_id": 1}):
+        return  # already seeded
+    docs = _grc_controls_seed() + _grc_pbc_seed() + [_grc_audit_meta_seed()]
+    for d in docs:
+        d["simulation_id"] = _sim
+        d["day"] = 1
+    grc_col.insert_many(docs)
 
 SEED_FUNCTIONS = {
     "accountant": seed_accountant,
