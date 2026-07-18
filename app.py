@@ -2556,6 +2556,49 @@ def seed_grc(cfg):
 # Flaws are authored INTO the artifact data — never stated in metadata.
 # ══════════════════════════════════════════════════════════════════
 
+_GRC_CAST = {"Marcus Vale", "Priya Nair", "Sam Osei", "Dana Whitfield", "Alex Chen"}
+_GRC_FRAMEWORK_RE = re.compile(r"^(SOC 2 CC\d+\.\d+|ISO 27001 A\.\d+\.\d+)$")
+_GRC_ISO_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+
+def _enrich_grc_control(doc: dict, sim: str, current_day: int = 1) -> dict:
+    """Stamp + validate a grc_col doc at insert time. Fails LOUD on any
+    convention violation (like the SIEM conventions audit) — a bad seed
+    should crash, not ship. Handles control / pbc / audit_meta doc types.
+    Derives status=due_soon when a needs_evidence control's deadline is
+    within 2 sim-days of current_day."""
+    d = dict(doc)
+    d["simulation_id"] = sim
+    d.setdefault("day", 1)
+    dt = d.get("doc_type")
+
+    # owner must be a real coworker (control + pbc carry an owner; audit_meta doesn't)
+    owner = d.get("owner")
+    if owner is not None and owner not in _GRC_CAST:
+        raise ValueError(f"grc enrich: owner {owner!r} not in cast on {d.get('control_id') or d.get('pbc_id')}")
+
+    if dt == "control":
+        for fr in d.get("framework_refs", []):
+            if not _GRC_FRAMEWORK_RE.match(fr):
+                raise ValueError(f"grc enrich: framework_ref {fr!r} fails pattern on {d.get('control_id')}")
+        lt = d.get("last_tested")
+        if lt and not _GRC_ISO_DATE_RE.match(str(lt)):
+            raise ValueError(f"grc enrich: last_tested {lt!r} not ISO YYYY-MM-DD on {d.get('control_id')}")
+        # due_soon overlay: a control still awaiting evidence whose deadline is imminent.
+        edd = d.get("evidence_due_day")
+        if d.get("status") == "needs_evidence" and edd is not None and (edd - current_day) <= 2:
+            d["status"] = "due_soon"
+        # every nested evidence item must carry complete ground truth.
+        for ev in d.get("evidence_items", []):
+            for k in ("is_flawed", "flaw_type", "correct_verdict", "correct_reject_reason", "points_correct", "points_wrong"):
+                if k not in ev:
+                    raise ValueError(f"grc enrich: evidence {ev.get('ev_id')} missing ground-truth field {k!r}")
+            if ev.get("submitted_day") is not None and not isinstance(ev["submitted_day"], int):
+                raise ValueError(f"grc enrich: evidence {ev.get('ev_id')} submitted_day must be int")
+    elif dt == "pbc":
+        if not isinstance(d.get("due_day"), int):
+            raise ValueError(f"grc enrich: pbc {d.get('pbc_id')} due_day must be int")
+    return d
+
 def _grc_controls_seed() -> list[dict]:
     """The 10 authored controls (5 passing, 2 failing, 3 needs_evidence).
     The 3 needs_evidence controls carry the 6 authored evidence items —
@@ -2715,10 +2758,9 @@ def _seed_grc_compliancehub(cfg):
     if grc_col.find_one({"simulation_id": _sim}, {"_id": 1}):
         return  # already seeded
     docs = _grc_controls_seed() + _grc_pbc_seed() + [_grc_audit_meta_seed()]
-    for d in docs:
-        d["simulation_id"] = _sim
-        d["day"] = 1
-    grc_col.insert_many(docs)
+    # Day-1 seed: enrich (validate + derive status) relative to sim-day 1.
+    enriched = [_enrich_grc_control(d, _sim, 1) for d in docs]
+    grc_col.insert_many(enriched)
 
 SEED_FUNCTIONS = {
     "accountant": seed_accountant,
