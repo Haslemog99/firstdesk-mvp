@@ -1221,6 +1221,13 @@ button{cursor:pointer}
 <div class="desc">Quietly unwind a celebrated A/B test that's actually broken, surface the real Q2 win, and triage a Sales VP demanding three roadmap commits — without burning the analyst or the eng partner who shipped it.</div>
 <div class="go">Begin <span class="arr">→</span></div>
 </div>
+<div class="career-card" onclick="startCareer('grc')">
+<div class="num">08 — Governance, Risk & Compliance</div>
+<div class="role">Junior GRC Analyst</div>
+<div class="where">Halcyon Health</div>
+<div class="desc">SOC 2 fieldwork starts in three days. Clean up a risk register that's tidier than it is true, refuse to mark controls "implemented" without evidence, escalate a PHI vendor with no BAA, and answer a customer questionnaire honestly while Sales pushes for all green ticks.</div>
+<div class="go">Begin <span class="arr">→</span></div>
+</div>
 </div>
 
 <!-- Adaptive scenario: paste a real job description -->
@@ -1229,7 +1236,7 @@ button{cursor:pointer}
 <h3>Bring your own job description</h3>
 <p class="jd-sub">Paste a public job listing URL (Greenhouse, Lever, Workable, Ashby, Indeed, Reed, Wellfound) or the description text. We'll generate a tailored day with 5 connected tools, multi-step workflows, and AI coworkers shaped by the role.</p>
 <div class="jd-tabs"><div class="jd-tab on" id="jdTabUrl" onclick="jdSwitch('url')">Paste URL</div><div class="jd-tab" id="jdTabText" onclick="jdSwitch('text')">Paste text</div></div>
-<div class="jd-row"><label>Career track</label><select id="jdCareer"><option value="auto" selected>✨ Auto-detect from job description (works for any role)</option><option disabled style="color:#52525b">── or pick a specific track ──</option><option value="accountant">Accountant — Finance</option><option value="cybersecurity">Cybersecurity Analyst — SOC</option><option value="marketing">Marketing / Sales / Growth</option><option value="developer">Software Engineer</option><option value="procurement">IT Procurement / Ops</option><option value="hr">L&amp;D / People / Recruiting</option><option value="pm">Product Manager / Designer / Analyst</option></select></div>
+<div class="jd-row"><label>Career track</label><select id="jdCareer"><option value="auto" selected>✨ Auto-detect from job description (works for any role)</option><option disabled style="color:#52525b">── or pick a specific track ──</option><option value="accountant">Accountant — Finance</option><option value="cybersecurity">Cybersecurity Analyst — SOC</option><option value="marketing">Marketing / Sales / Growth</option><option value="developer">Software Engineer</option><option value="procurement">IT Procurement / Ops</option><option value="hr">L&amp;D / People / Recruiting</option><option value="pm">Product Manager / Designer / Analyst</option><option value="grc">GRC / Compliance / Risk / IT Audit</option></select></div>
 <div class="jd-row" id="jdRowUrl"><label>Listing URL</label><input id="jdUrl" type="url" placeholder="https://boards.greenhouse.io/company/jobs/123…"></div>
 <div class="jd-row" id="jdRowText" style="display:none"><label>Description</label><textarea id="jdText" placeholder="Paste the full job description here. We use the responsibilities and tools mentioned to generate your simulation."></textarea></div>
 <div class="jd-row"><label>Company (optional)</label><input id="jdCompany" type="text" placeholder="e.g. Stripe, Monzo, Acme Health"></div>
@@ -1615,7 +1622,7 @@ if(jd){
   return;
 }
 // Hard-coded career flow
-showLoader('Starting your first day at '+({accountant:'Apex Financial',cybersecurity:'ShieldWall',marketing:'BrightPath',developer:'CodeCraft Labs',procurement:'TechStack Procurement',hr:'Helix People Co.',pm:'Northwind Cloud'})[career]+'…','Hiring AI coworkers, seeding your inbox, opening your tools');
+showLoader('Starting your first day at '+({accountant:'Apex Financial',cybersecurity:'ShieldWall',marketing:'BrightPath',developer:'CodeCraft Labs',procurement:'TechStack Procurement',hr:'Helix People Co.',pm:'Northwind Cloud',grc:'Halcyon Health'})[career]+'…','Hiring AI coworkers, seeding your inbox, opening your tools');
 let d;
 try{const r=await fetch(A+'/api/start',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({career,experience_level:level})});d=await r.json()}
 catch(e){hideLoader();toast('Could not start session. Is the backend running?','error');return}
@@ -1649,7 +1656,7 @@ showLevelPicker();
 async function _bootSimulation(d, career){
 showDesktop();
 const icons=document.getElementById('desktopIcons');
-const toolMap={accountant:{icon:'sage',name:'Sage',tint:'#22A06B'},cybersecurity:{icon:'siem',name:'SIEM',tint:'#DC2626'},marketing:{icon:'campaigns',name:'Campaigns',tint:'#7C3AED'},developer:{icon:'jira',name:'Jira',tint:'#F59E0B'},procurement:null,hr:null,pm:null};
+const toolMap={accountant:{icon:'sage',name:'Sage',tint:'#22A06B'},cybersecurity:{icon:'siem',name:'SIEM',tint:'#DC2626'},marketing:{icon:'campaigns',name:'Campaigns',tint:'#7C3AED'},developer:{icon:'jira',name:'Jira',tint:'#F59E0B'},procurement:null,hr:null,pm:null,grc:null};
 const tm=toolMap[career];
 // Tab each icon should open inside the legacy #w-tool window.
 const PRIMARY_TAB={accountant:'bank',cybersecurity:'siem',marketing:'campaigns',developer:'jira'};
@@ -1702,7 +1709,7 @@ document.getElementById('flagBtn').style.display='none';
 document.getElementById('toolTabs').innerHTML='';
 document.getElementById('flagBtn').style.display='none';
 }
-const company=(d&&d.company)||{accountant:'Apex Financial',cybersecurity:'ShieldWall',marketing:'BrightPath',developer:'CodeCraft Labs',procurement:'TechStack Procurement Ltd',hr:'Helix People Co.',pm:'Northwind Cloud'}[career];
+const company=(d&&d.company)||{accountant:'Apex Financial',cybersecurity:'ShieldWall',marketing:'BrightPath',developer:'CodeCraft Labs',procurement:'TechStack Procurement Ltd',hr:'Helix People Co.',pm:'Northwind Cloud',grc:'Halcyon Health'}[career];
 const ws=document.getElementById('slWsName');if(ws)ws.textContent=company||'FirstDesk';
 tw('outlook');tw('chat');
 // Generic tools — adaptive scenarios populate tools_col; render an icon per tool.
@@ -1730,7 +1737,7 @@ async function _loadLevelMeta(career){
   }catch(e){console.warn('session meta load failed',e)}
   // Tooltips only matter in beginner mode — fetch the relevant types on demand.
   if(_isBeginner){
-    const types=career==='cybersecurity'?['alerts','kanban']:career==='accountant'?['table']:career==='marketing'?['campaigns','calendar']:career==='developer'?['kanban']:career==='procurement'?['kanban','table']:career==='hr'?['kanban','table']:career==='pm'?['kanban','table']:[];
+    const types=career==='cybersecurity'?['alerts','kanban']:career==='accountant'?['table']:career==='marketing'?['campaigns','calendar']:career==='developer'?['kanban']:career==='procurement'?['kanban','table']:career==='hr'?['kanban','table']:career==='pm'?['kanban','table']:career==='grc'?['kanban','table']:[];
     for(const t of types){
       try{const r=await fetch(A+'/api/tooltips?tool_type='+encodeURIComponent(t));const d=await r.json();if(d&&d.tooltips){_tipsByType[t]=d.tooltips}}catch(e){}
     }
@@ -2170,7 +2177,7 @@ async function li(){const l=document.getElementById('mlist');if(l&&!l.dataset.lo
 async function om(id){const r=await fetch(A+'/api/inbox');const d=await r.json();ce=d.emails.find(e=>e.id===id);if(!ce)return;document.getElementById('mlist').style.display='none';document.getElementById('mdet').classList.add('on');document.getElementById('dsubj').textContent=ce.subject;const av=document.getElementById('davatar');av.textContent=avi(ce.from_name);av.style.background=avc(ce.from_name);const role=ce.from_role?` · ${ce.from_role}`:'';document.getElementById('dmeta').innerHTML=`<b>${esc(ce.from_name)}</b>${esc(role)}<br><span style="color:#605e5c">To: Me · ${esc(ce.time||'')}</span>`;document.getElementById('dbody').innerHTML=mdRender(ce.body);const _dra=document.getElementById('dra');_dra.style.display='flex';_dra.classList.remove('expanded');const _cb=document.getElementById('mraCollapseBtn');if(_cb)_cb.style.display='none';_fillReply(ce);try{await fetch(A+'/api/email/'+id+'/read',{method:'POST'})}catch(e){}}
 function _fillReply(e){const toEl=document.getElementById('rTo');if(toEl){const em=e.from_email||(e.from_name?e.from_name.toLowerCase().replace(/\s+/g,'.')+'@company.com':'');toEl.innerHTML='<span class="mra-chip"><span class="av" style="background:'+avc(e.from_name)+'">'+esc(avi(e.from_name))+'</span><span class="nm">'+esc(e.from_name||'Recipient')+'</span><span class="em">&lt;'+esc(em)+'&gt;</span></span>'}const subEl=document.getElementById('rSubj');if(subEl){const s=String(e.subject||'');subEl.value=s.startsWith('Re: ')?s:('Re: '+s)}const ccRow=document.getElementById('rCcRow');const bccRow=document.getElementById('rBccRow');if(ccRow)ccRow.style.display='none';if(bccRow)bccRow.style.display='none';document.querySelectorAll('.mra-toggles .mra-add').forEach(el=>el.classList.remove('on'));const rcc=document.getElementById('rCc');if(rcc)rcc.value='';const rbcc=document.getElementById('rBcc');if(rbcc)rbcc.value='';const sig=document.getElementById('rSig');const meName=(currentUser&&currentUser.name)||'You';const meRole=_careerRoleLabel(cc);const meOrg=_careerOrgLabel(cc);const initials=avi(meName);if(sig)sig.innerHTML='<b>'+esc(meName)+'</b><span class="ttl">'+esc(meRole)+'</span><div class="org">'+esc(meOrg)+'</div>';const meEl=document.getElementById('rMe');if(meEl)meEl.textContent=meName}
 function _careerRoleLabel(career){const map={accountant:'Junior Accountant',cybersecurity:'SOC Analyst',marketing:'Marketing Associate',developer:'Junior Developer',procurement:'Procurement Analyst',hr:'L&D Specialist',pm:'Growth Product Manager'};return map[career]||'Team Member'}
-function _careerOrgLabel(career){const map={accountant:'Apex Financial',cybersecurity:'ShieldWall Security',marketing:'BrightPath',developer:'CodeCraft Labs',procurement:'TechStack Procurement Ltd',hr:'Helix People Co.',pm:'Northwind Cloud'};return map[career]||'FirstDesk'}
+function _careerOrgLabel(career){const map={accountant:'Apex Financial',cybersecurity:'ShieldWall Security',marketing:'BrightPath',developer:'CodeCraft Labs',procurement:'TechStack Procurement Ltd',hr:'Helix People Co.',pm:'Northwind Cloud',grc:'Halcyon Health'};return map[career]||'FirstDesk'}
 function toggleCcBcc(which){const row=document.getElementById(which==='cc'?'rCcRow':'rBccRow');const btn=document.getElementById(which==='cc'?'ccBtn':'bccBtn');if(!row)return;const show=row.style.display==='none';row.style.display=show?'flex':'none';if(btn)btn.classList.toggle('on',show);if(show){const i=row.querySelector('input');if(i)i.focus()}}
 function fmtIns(pre,post){const ta=document.getElementById('rtxt');if(!ta)return;if(post===undefined)post=pre;const s=ta.selectionStart||0,e=ta.selectionEnd||0;const v=ta.value;const sel=v.slice(s,e);ta.value=v.slice(0,s)+pre+sel+post+v.slice(e);ta.focus();const ns=s+pre.length;ta.setSelectionRange(ns,ns+sel.length)}
 function fmtList(prefix){const ta=document.getElementById('rtxt');if(!ta)return;const s=ta.selectionStart||0;const v=ta.value;const lineStart=v.lastIndexOf('\n',Math.max(0,s-1))+1;ta.value=v.slice(0,lineStart)+prefix+v.slice(lineStart);ta.focus();ta.setSelectionRange(s+prefix.length,s+prefix.length)}

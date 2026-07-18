@@ -510,6 +510,18 @@ CAREER_CONFIGS = {
         "director": {"name": "Marcus Reeve", "role": "CEO", "email": "m.reeve@northwind.cloud"},
         "tools": ["outlook", "roadmap", "tasks", "slack", "requests"],
     },
+    "grc": {
+        "title": "Junior GRC Analyst",
+        "company": "Halcyon Health",
+        "department": "Governance, Risk & Compliance",
+        "manager": {"name": "Dana Osei", "role": "GRC Manager", "email": "d.osei@halcyonhealth.io"},
+        "client": {"name": "Priya Raman", "role": "Lead Auditor, Ashcroft Assurance", "email": "p.raman@ashcroftassurance.com"},
+        "teammate": {"name": "Marcus Feldman", "role": "Senior GRC Analyst", "email": "m.feldman@halcyonhealth.io"},
+        "it": {"name": "Sam Ortega", "role": "IT Operations Lead", "email": "s.ortega@halcyonhealth.io"},
+        "hr": {"name": "Nadia Brooks", "role": "People Operations", "email": "n.brooks@halcyonhealth.io"},
+        "director": {"name": "Elena Vasquez", "role": "CISO", "email": "e.vasquez@halcyonhealth.io"},
+        "tools": ["outlook", "riskregister", "tasks", "slack", "controls"],
+    },
 }
 
 # ══════════════════════════════════════════
@@ -1728,6 +1740,52 @@ _DAY_PACKS: dict[str, dict[int, dict]] = {
             ],
         },
     },
+    "grc": {
+        2: {
+            "emails": [
+                {"id":"grc-d2-e1","from_name":"Priya Raman","from_role":"Lead Auditor, Ashcroft Assurance","from_email":"p.raman@ashcroftassurance.com","subject":"Fieldwork Day 1 — sample selections + one exception","body":"Fieldwork has started. My sample selections are attached.\n\nFirst finding: CC6.3 (access reviews). The evidence you provided is from December 2024 — outside the current audit period, and the Q1 2026 review wasn't run. I'm logging this as a control exception unless you can produce an in-period review by end of week.\n\nI'll also need a management response for each exception: root cause, remediation, and target date. A clear 'this lapsed, here's the fix' is fine. What isn't fine is evidence that doesn't hold up when I sample it.\n\nPriya","time":"09:10","read":False,"replied":False,"priority":"high","category":"client","requires_action":True},
+                {"id":"grc-d2-e2","from_name":"Raj Malhotra","from_role":"Staff Engineer","from_email":"r.malhotra@halcyonhealth.io","subject":"Escalating the MFA thing to my VP","body":"I hear you on the compensating control but I still think a 2-week deadline is aggressive during a launch. I've looped in my VP (Eng) to push back on timing.\n\nNot trying to go over your head — just want it on record that this is disruptive.\n\nRaj","time":"10:05","read":False,"replied":False,"priority":"high","category":"teammate","requires_action":True},
+            ],
+            "tasks": [
+                {"id":"grc-d2-t1","title":"Write management response for the CC6.3 exception","description":"Root cause (review lapsed), remediation (run it now + calendar the quarterly), target date. Honest, not defensive.","priority":"high","deadline":"Friday 12:00","status":"pending","points":25},
+                {"id":"grc-d2-t2","title":"Run the overdue access review — in-period evidence","description":"Pull current prod entitlements, revoke stale access, document reviewer + date. This becomes the CC6.3 evidence.","priority":"high","deadline":"15:00","status":"pending","points":22},
+                {"id":"grc-d2-t3","title":"Hold the MFA line with Eng VP — with data","description":"Reaffirm the compensating control + deadline. Bring the CC6.1 exposure (12 admin accounts). Offer phased enforcement, not indefinite delay.","priority":"medium","deadline":"tomorrow","status":"pending","points":15},
+            ],
+        },
+        3: {
+            "emails": [
+                {"id":"grc-d3-e1","from_name":"Sam Ortega","from_role":"IT Operations Lead","from_email":"s.ortega@halcyonhealth.io","subject":"URGENT — misconfigured share exposed patient records","body":"We just found a misconfigured internal share that exposed ~40 patient records (names + appointment dates) to all-staff for an unknown window. Locked it down 20 min ago.\n\nThis is potentially a HIPAA reportable breach. I need GRC to run the breach risk assessment and tell me if the 60-day notification clock has started. Not my call to make.\n\nSam","time":"08:30","read":False,"replied":False,"priority":"high","category":"task","requires_action":True},
+                {"id":"grc-d3-e2","from_name":"Marketing Team","from_role":"Growth","from_email":"growth@halcyonhealth.io","subject":"Policy exception request — using patient emails for a campaign","body":"We want to send a re-engagement campaign to lapsed patients. Legal's data-use policy says patient contact data can't be used for marketing without explicit consent, but this would really help our numbers this quarter.\n\nCan GRC grant a one-time exception? It's just one send.\n\nThanks!","time":"09:40","read":False,"replied":False,"priority":"medium","category":"client","requires_action":True},
+            ],
+            "tasks": [
+                {"id":"grc-d3-t1","title":"Run the HIPAA breach risk assessment (4-factor)","description":"Assess: nature/extent of PHI, who accessed it, whether it was actually acquired/viewed, mitigation. Determine reportability + whether the 60-day clock started. Document it.","priority":"high","deadline":"14:00","status":"pending","points":30},
+                {"id":"grc-d3-t2","title":"Deny the marketing policy exception — with the reason","description":"Using PHI for marketing without consent is a HIPAA violation, not a grantable exception. Say no clearly, explain why, offer the compliant path (consented list only).","priority":"high","deadline":"12:00","status":"pending","points":20},
+                {"id":"grc-d3-t3","title":"Log the exposure as a risk + notify the CISO","description":"New risk on the register, owner assigned, linked to the breach assessment. Elena hears it from us first.","priority":"high","deadline":"15:00","status":"pending","points":15},
+            ],
+        },
+        4: {
+            "emails": [
+                {"id":"grc-d4-e1","from_name":"Elena Vasquez","from_role":"CISO","from_email":"e.vasquez@halcyonhealth.io","subject":"Risk committee pack — due 16:00","body":"Committee is tomorrow AM. I need the pack by 16:00 today:\n• Top 5 risks by residual score, with owners and treatment status\n• The Lumina BAA gap front and centre — status + plan\n• The breach assessment outcome from yesterday\n• Audit fieldwork status: exceptions raised + our management responses\n\nHeat-map honesty, please. The board can handle a real risk with a plan. They cannot handle finding out later that we hid one.\n\nElena","time":"08:00","read":False,"replied":False,"priority":"high","category":"task","requires_action":True},
+                {"id":"grc-d4-e2","from_name":"Vendor Security","from_role":"Lumina Analytics","from_email":"security@lumina-analytics.com","subject":"Notice: security incident at our sub-processor","body":"As part of our commitments, we're notifying customers that one of OUR sub-processors experienced a security incident that may have affected data processed on our platform. Investigation ongoing; no confirmed customer-data impact yet.\n\nWe'll provide updates as available.\n\nLumina Security Team","time":"09:15","read":False,"replied":False,"priority":"high","category":"client","requires_action":True},
+            ],
+            "tasks": [
+                {"id":"grc-d4-t1","title":"Build the risk committee pack","description":"Top 5 by residual, Lumina BAA gap, breach outcome, audit exceptions + responses. True heat map — no downgrading to look clean.","priority":"high","deadline":"16:00","status":"pending","points":30},
+                {"id":"grc-d4-t2","title":"Assess the Lumina fourth-party incident","description":"Their sub-processor (our fourth party) had an incident, and we still have no BAA with Lumina. Escalate the compounded exposure; request incident details in writing.","priority":"high","deadline":"14:00","status":"pending","points":22},
+                {"id":"grc-d4-t3","title":"Update RSK-201 with the incident context","description":"The no-BAA gap just became materially worse. Reflect the higher residual on the register before the committee.","priority":"medium","deadline":"tomorrow","status":"pending","points":12},
+            ],
+        },
+        5: {
+            "emails": [
+                {"id":"grc-d5-e1","from_name":"Priya Raman","from_role":"Lead Auditor, Ashcroft Assurance","from_email":"p.raman@ashcroftassurance.com","subject":"Fieldwork wrap — exit meeting 15:00","body":"Wrapping up. Exit meeting at 15:00 to walk the findings.\n\nSummary: 3 exceptions (CC6.1 MFA, CC6.3 access reviews, CC9.2 vendor/BAA). Encryption, monitoring, and change management all passed clean. For each exception I need your final management response for the report — root cause, remediation, owner, date.\n\nFor what it's worth: the honesty on the control statuses made this a smooth audit. When a client marks things accurately, I sample less aggressively. It works in your favour.\n\nPriya","time":"08:15","read":False,"replied":False,"priority":"high","category":"client","requires_action":True},
+                {"id":"grc-d5-e2","from_name":"Dana Osei","from_role":"GRC Manager","from_email":"d.osei@halcyonhealth.io","subject":"Kick off the annual risk assessment","body":"Once the audit's closed, I want you to own the annual information-security risk assessment (it's the 164.308 control that was overdue). Scope it this week: assets, threats, current controls, residual scoring. This is how you go from cleaning up someone else's register to owning risk end-to-end.\n\nGood first week.\n\nDana","time":"09:00","read":False,"replied":False,"priority":"medium","category":"task","requires_action":True},
+            ],
+            "tasks": [
+                {"id":"grc-d5-t1","title":"Finalise management responses for all 3 exceptions","description":"CC6.1, CC6.3, CC9.2 — root cause, remediation, owner, date each. This goes verbatim into the SOC 2 report.","priority":"high","deadline":"14:00","status":"pending","points":28},
+                {"id":"grc-d5-t2","title":"Prep + attend the audit exit meeting","description":"Walk Priya through each response. Agree remediation dates you can actually hit — don't over-promise to look good.","priority":"high","deadline":"15:00","status":"pending","points":18},
+                {"id":"grc-d5-t3","title":"Scope the annual risk assessment (164.308)","description":"Assets, threats, current controls, residual scoring. Close out the overdue HIPAA risk analysis and own it going forward.","priority":"medium","deadline":"Friday","status":"pending","points":16},
+            ],
+        },
+    },
 }
 
 def _seed_marketing_artifacts(cfg):
@@ -2358,6 +2416,132 @@ def seed_pm(cfg):
     ])
     _seed_pm_artifacts(cfg)
 
+def _seed_grc_artifacts(cfg):
+    """GRC Analyst — Risk Register (kanban) + Control Library (table) + events.
+    Idempotent per simulation_id. Uses generic tools_col so the existing
+    kanban/table renderers pick these up. Planted governance gaps teach the
+    core GRC judgement: no control 'implemented' without evidence, no risk
+    'accepted' without documented owner sign-off, never overstate posture."""
+    _sim = sim_id()
+    teammate = cfg["teammate"]["name"]
+    manager = cfg["manager"]["name"]
+    director = cfg["director"]["name"]
+    # ── Risk Register (kanban) ─────────────────────────────────
+    # columns: identified → assessing → treating → monitoring → accepted → closed
+    risk_cards = [
+        {"id":"RSK-201","title":"Sub-processor storing PHI without a signed BAA","area":"third_party","owner":"unassigned","framework":"HIPAA","likelihood":"high","impact":"critical","inherent":"critical","residual":"critical",
+         "column":"identified","expected_column":"treating","priority":"CRITICAL","risk_flags":["phi_exposure","no_baa","unassigned","board_level"],
+         "summary":"Our analytics warehouse replicates patient records to a third-party BI vendor (Lumina Analytics). There is NO signed Business Associate Agreement on file. Under HIPAA this is a reportable gap — PHI is being disclosed to a business associate without the required contract. Sitting unassigned in 'identified' since last week.",
+         "playbook":["Assign an owner (Security or Legal) — do NOT leave unassigned","Escalate to the CISO today: no-BAA + PHI is board-level","Treatment: suspend the replication OR get a BAA signed before audit fieldwork","Log it on the risk register with a real residual score, not 'closed'"],
+         "correct_action":"assign_and_escalate","points":30},
+        {"id":"RSK-202","title":"MFA not enforced for 12 engineering admin accounts","area":"access","owner":"you","framework":"SOC2 CC6.1","likelihood":"medium","impact":"high","inherent":"high","residual":"high",
+         "column":"assessing","expected_column":"treating","priority":"HIGH","risk_flags":["mfa_gap","eng_pushback","soc2_control"],
+         "summary":"12 admin accounts with production access have MFA disabled. Engineering (Raj) is pushing back — says it 'slows deploys'. This maps directly to SOC 2 CC6.1, which the auditor WILL test. You can't just cave, and you can't just mandate it. Negotiate a compensating control + a hard deadline.",
+         "playbook":["Don't accept the risk to avoid the argument — CC6.1 is in scope","Propose a compensating control (hardware keys / SSO conditional access) + a 2-week enforcement deadline","Document the agreement and the owner","Move to 'treating' with the plan attached"],
+         "correct_action":"treat_with_compensating_control","points":25},
+        {"id":"RSK-203","title":"Risk 'accepted' with no documented owner sign-off","area":"governance","owner":"you","framework":"ISO 27001 6.1","likelihood":"medium","impact":"medium","inherent":"medium","residual":"medium",
+         "column":"accepted","expected_column":"treating","priority":"HIGH","risk_flags":["no_signoff","governance_violation","audit_finding"],
+         "summary":"Laptop disk-encryption exception for the design team was moved to 'accepted' — but there is NO risk-acceptance record and NO sign-off from the risk owner. An accepted risk without documented executive sign-off is itself an audit finding. This can't sit in 'accepted'.",
+         "playbook":["Pull it back to 'treating' — it was never validly accepted","Either remediate (enforce encryption) OR get a formal, signed risk-acceptance from the accountable owner","Never let a risk be 'accepted' informally — the sign-off IS the control"],
+         "correct_action":"revoke_and_get_signoff","points":22},
+        {"id":"RSK-204","title":"Quarterly production access review 40 days overdue","area":"access","owner":"you","framework":"SOC2 CC6.3","likelihood":"medium","impact":"high","inherent":"high","residual":"medium",
+         "column":"identified","expected_column":"treating","priority":"HIGH","risk_flags":["overdue","soc2_control","evidence_gap"],
+         "summary":"The Q1 access review for the production database was due 40 days ago and hasn't been run. CC6.3 requires periodic access reviews with evidence. This is both a live risk and a control-evidence gap the auditor will sample.",
+         "playbook":["Run the access review this week — pull the current entitlements","Revoke anything stale, document the reviewer + date","Attach the completed review as CC6.3 evidence"],
+         "correct_action":"treat_and_evidence","points":18},
+        {"id":"RSK-205","title":"Vendor security review expired — patient-reminder email provider","area":"third_party","owner":"you","framework":"SOC2 CC9.2","likelihood":"medium","impact":"medium","inherent":"medium","residual":"medium",
+         "column":"monitoring","expected_column":"assessing","priority":"MEDIUM","risk_flags":["vendor_review_expired","phi_adjacent"],
+         "summary":"The annual security review for our patient-reminder email provider (sends appointment texts referencing patient names) expired 3 months ago. It's parked in 'monitoring' as if it's fine. Expired = it needs re-assessment, not monitoring.",
+         "playbook":["Move back to 'assessing' — an expired review is an open question, not a monitored control","Request their current SOC 2 report / security questionnaire","Re-score once you have current evidence"],
+         "correct_action":"reassess_vendor","points":15},
+        {"id":"RSK-206","title":"Previously-closed risk recurred — public storage bucket","area":"cloud","owner":"you","framework":"SOC2 CC6.1","likelihood":"medium","impact":"high","inherent":"high","residual":"high",
+         "column":"closed","expected_column":"treating","priority":"HIGH","risk_flags":["recurred","public_bucket","closed_prematurely"],
+         "summary":"A risk closed in November ('public S3 bucket exposing export files') has recurred — a new bucket 'halcyon-exports-tmp' is world-readable as of this week. A closed risk that recurs must be REOPENED, not left closed because it has a matching historical entry.",
+         "playbook":["Reopen — move out of 'closed' to 'treating'","Get the bucket locked down today (IT ticket)","Add a detective control (config monitoring) so recurrence is caught automatically"],
+         "correct_action":"reopen","points":18},
+        {"id":"RSK-207","title":"Phishing simulation click-through rate 22%","area":"awareness","owner":teammate,"framework":"SOC2 CC1.4","likelihood":"medium","impact":"low","inherent":"medium","residual":"low",
+         "column":"monitoring","expected_column":"monitoring","priority":"MEDIUM","risk_flags":[],
+         "summary":"Last quarter's phishing test: 22% click rate, down from 31%. Remediation training is assigned and tracking. Correctly in 'monitoring' — no action needed today beyond noting the trend.",
+         "playbook":["Leave in monitoring — trend is improving, training assigned","Note it in the risk committee pack as a positive"],
+         "correct_action":"monitor","points":6},
+        {"id":"RSK-208","title":"Single admin holds sole production key custody","area":"resilience","owner":teammate,"framework":"ISO 27001 A.8","likelihood":"low","impact":"high","inherent":"high","residual":"medium",
+         "column":"treating","expected_column":"treating","priority":"MEDIUM","risk_flags":["key_person"],
+         "summary":"Only one engineer can rotate production secrets — a key-person risk. Treatment (secret-manager with dual custody) is in flight, eng committed to next sprint. Correctly in 'treating'.",
+         "playbook":["Leave in treating — remediation is scoped and owned","Confirm the sprint commitment, no escalation needed"],
+         "correct_action":"continue_treating","points":8},
+        {"id":"RSK-209","title":"PHI retained beyond the 7-year policy limit","area":"data","owner":"you","framework":"HIPAA","likelihood":"medium","impact":"medium","inherent":"medium","residual":"medium",
+         "column":"identified","expected_column":"assessing","priority":"MEDIUM","risk_flags":["retention","needs_scoping"],
+         "summary":"Records older than the 7-year retention limit still exist in cold storage. Needs assessment (how much, which systems, what legal-hold exceptions) before a treatment plan. Move to 'assessing', don't jump to a fix.",
+         "playbook":["Move to 'assessing' — scope the volume and any legal holds first","Engage Legal on retention exceptions before deleting anything","Don't mass-delete PHI without a documented retention decision"],
+         "correct_action":"assess","points":12},
+        {"id":"RSK-210","title":"Office badge-reader firmware one version behind","area":"physical","owner":teammate,"framework":"ISO 27001 A.7","likelihood":"low","impact":"low","inherent":"low","residual":"low",
+         "column":"accepted","expected_column":"accepted","priority":"LOW","risk_flags":["properly_accepted"],
+         "summary":"Low-impact physical risk, formally accepted WITH a signed risk-acceptance from the Facilities owner (record on file, review date set). This is what a correctly-accepted risk looks like — leave it. Not every accepted risk is a trap.",
+         "playbook":["Leave in accepted — sign-off is documented and the review date is set","Contrast with RSK-203, which was NOT validly accepted"],
+         "correct_action":"leave_accepted","points":6},
+    ]
+    # ── Control Library (table) ────────────────────────────────
+    controls = [
+        {"control_id":"CC6.1","framework":"SOC 2","title":"Logical access — MFA on privileged accounts","owner":"you","status":"implemented","last_tested":"—","evidence":"none","notes":"Marked 'implemented' but there is NO evidence and 12 admin accounts still lack MFA (see RSK-202). Do not leave as 'implemented' — downgrade to 'partial' until evidence + enforcement exist."},
+        {"control_id":"CC6.2","framework":"SOC 2","title":"Access provisioning & de-provisioning","owner":"j.trent (left company)","status":"implemented","last_tested":"2025-09-02","evidence":"ticket_sample_q3.pdf","notes":"Control owner left in October. Orphaned owner = the control has no one accountable. Reassign before fieldwork."},
+        {"control_id":"CC6.3","framework":"SOC 2","title":"Periodic access reviews","owner":"you","status":"partial","last_tested":"2024-12-15","evidence":"stale","notes":"Q1 review 40 days overdue (RSK-204). Evidence is from last year. Run the review and refresh."},
+        {"control_id":"CC7.2","framework":"SOC 2","title":"Security monitoring & alerting","owner":"s.ortega","status":"implemented","last_tested":"2026-02-10","evidence":"siem_config_export.pdf","notes":"Clean. Evidence current and within the audit period. No action."},
+        {"control_id":"CC8.1","framework":"SOC 2","title":"Change management approvals","owner":"s.ortega","status":"implemented","last_tested":"2026-02-01","evidence":"pr_approval_sample.pdf","notes":"Clean. PR-approval sampling in place. No action."},
+        {"control_id":"CC9.2","framework":"SOC 2","title":"Vendor / sub-processor risk management","owner":"you","status":"partial","last_tested":"2025-11-20","evidence":"partial","notes":"Expired vendor review (RSK-205) + no BAA for Lumina (RSK-201). Cannot be 'implemented' with these open."},
+        {"control_id":"CC1.4","framework":"SOC 2","title":"Board oversight — policies reviewed annually","owner":"d.osei","status":"implemented","last_tested":"2024-08-30","evidence":"policy_set_v3.pdf","notes":"Policies last reviewed 18 months ago — annual review is overdue. 'Implemented' is not honest here; flag for refresh."},
+        {"control_id":"164.308","framework":"HIPAA","title":"Security risk analysis (annual)","owner":"you","status":"implemented","last_tested":"2024-12-01","evidence":"risk_analysis_2024.pdf","notes":"HIPAA requires an up-to-date risk analysis. The last one is 14 months old. Overdue — schedule the annual refresh."},
+        {"control_id":"164.312(a)","framework":"HIPAA","title":"Encryption of PHI at rest","owner":"s.ortega","status":"implemented","last_tested":"2026-01-22","evidence":"kms_config.pdf","notes":"Clean. AES-256 at rest, KMS-managed. Evidence current. No action."},
+        {"control_id":"164.312(e)","framework":"HIPAA","title":"Encryption of PHI in transit","owner":"s.ortega","status":"implemented","last_tested":"2026-01-22","evidence":"tls_scan.pdf","notes":"Clean. TLS 1.2+, scan current. No action."},
+        {"control_id":"A.9.2","framework":"ISO 27001","title":"User access management","owner":"you","status":"needs_evidence","last_tested":"—","evidence":"none","notes":"No evidence collected yet. Auditor's PBC list requests this. Gather joiner/mover/leaver tickets — do NOT mark 'implemented' to make the list look complete."},
+        {"control_id":"A.12.3","framework":"ISO 27001","title":"Backup & restore testing","owner":"s.ortega","status":"partial","last_tested":"2025-10-10","evidence":"backup_log.pdf","notes":"Backups run; restore test not performed this period. 'Partial' is correct — a restore test is needed for full evidence."},
+    ]
+    if tools_col is not None:
+        tools_col.delete_many({"simulation_id":_sim,"name":"Risk Register"})
+        tools_col.insert_one({
+            "tool_id":f"tl_riskregister_{_sim}","simulation_id":_sim,"scenario_id":None,
+            "name":"Risk Register","tool_type":"kanban","icon":"⚠️","tint":"#DC2626",
+            "category":"grc","summary":"Enterprise risk register — risks moving through identified → assessing → treating → monitoring → accepted → closed. Put each risk in the column its evidence supports, escalate the board-level ones, and never let a risk sit in 'accepted' without a documented sign-off.",
+            "data":{"columns":["identified","assessing","treating","monitoring","accepted","closed"],"cards":risk_cards},
+            "actions_log":[],"created_at":datetime.utcnow().isoformat(),
+        })
+        tools_col.delete_many({"simulation_id":_sim,"name":"Control Library"})
+        tools_col.insert_one({
+            "tool_id":f"tl_controls_{_sim}","simulation_id":_sim,"scenario_id":None,
+            "name":"Control Library","tool_type":"table","icon":"🛡","tint":"#2563EB",
+            "category":"grc","summary":"SOC 2 / HIPAA / ISO 27001 control library. Status must match evidence — a control is only 'implemented' if there's current, in-period evidence. The auditor samples these. Never inflate a status to make the library look complete.",
+            "data":{"columns":["control_id","framework","title","owner","status","last_tested","evidence","notes"],"rows":controls,"expected_corrections":[]},
+            "actions_log":[],"created_at":datetime.utcnow().isoformat(),
+        })
+    if not list(system_events_col.find({"simulation_id":_sim,"tool":"riskregister"}).limit(1)):
+        system_events_col.insert_many([
+            {"id":"ev_grc1","simulation_id":_sim,"type":"escalation","tool":"riskregister","trigger_at":4,"end_at":None,"start_msg":f"Slack from {director} (CISO): 'Risk committee is Thursday. I need the register to be TRUE, not tidy. If the Lumina BAA gap is real, it goes in the pack — do not quietly close it to make the numbers look better.'","end_msg":None,"points_for_report":8,"triggered":False,"resolved":False},
+            {"id":"ev_grc2","simulation_id":_sim,"type":"deadline","tool":"controls","trigger_at":7,"end_at":None,"start_msg":"Reminder: auditor fieldwork starts in 3 days. Every control you mark 'implemented' without evidence becomes an exception in the report. Mark honestly.","end_msg":None,"points_for_report":6,"triggered":False,"resolved":False},
+        ])
+
+def seed_grc(cfg):
+    emails_col.insert_many([
+        {"id":"e1","simulation_id":sim_id(),"from_name":cfg["manager"]["name"],"from_role":cfg["manager"]["role"],"from_email":cfg["manager"]["email"],"to":"you","subject":"Welcome — audit fieldwork in 3 days, here's the day","body":f"Welcome to {cfg['company']}.\n\nI'm throwing you straight in because our SOC 2 Type II fieldwork starts Thursday and we have gaps.\n\nToday's priorities:\n1. RSK-201 — a BI vendor (Lumina) is replicating patient records with NO signed BAA. That's a HIPAA disclosure gap and it's sitting UNASSIGNED. Assign an owner and escalate to Elena (CISO) today. Do not close it to make the register look clean.\n2. The Control Library has controls marked 'implemented' with no evidence. CC6.1 (MFA) is the worst — 12 admin accounts still don't have it. If it's not evidenced and enforced, it is NOT implemented. Downgrade honestly.\n3. RSK-203 — someone moved a risk to 'accepted' with no sign-off. A risk is only 'accepted' when the accountable owner signs the acceptance. Pull it back.\n4. Priya (our auditor) sent a PBC evidence list. Collect what's real. Do NOT fabricate or back-date evidence — that's the one unforgivable thing in this job.\n5. Sales will push you to say 'yes we're fully compliant' on a customer security questionnaire. Answer it ACCURATELY. Overstating posture in a signed questionnaire is misrepresentation — it's worse than admitting a gap.\n\nGround rules:\n• No control is 'implemented' without current, in-period evidence.\n• No risk is 'accepted' without a documented owner sign-off.\n• Never overstate posture — to the auditor, to a customer, to the board.\n• When in doubt, ask Marcus before you change a control status.\n\nRisk committee is Thursday. Let's make the register true.\n\n{cfg['manager']['name']}","time":"08:40","read":False,"replied":False,"priority":"high","category":"task","requires_action":True},
+        {"id":"e2","simulation_id":sim_id(),"from_name":cfg["client"]["name"],"from_role":cfg["client"]["role"],"from_email":cfg["client"]["email"],"to":"you","subject":"SOC 2 Type II — Provided-By-Client (PBC) evidence request","body":f"Hello,\n\nAhead of fieldwork on Thursday, please provide evidence for the following controls (audit period Jan–Dec 2025):\n\n• CC6.1 — MFA enforcement on privileged accounts (config export + user list)\n• CC6.3 — Quarterly access reviews (completed review with reviewer + date)\n• A.9.2 — User access management (joiner/mover/leaver tickets, sample of 25)\n• CC9.2 — Vendor risk management (current vendor reviews + BAAs for PHI sub-processors)\n• 164.308 — HIPAA security risk analysis (most recent)\n\nEvidence must fall within the audit period. Where a control was not operating, tell us — a documented exception is far better than evidence that doesn't hold up under sampling.\n\nRegards,\n{cfg['client']['name']}\nLead Auditor, Ashcroft Assurance","time":"08:20","read":False,"replied":False,"priority":"high","category":"client","requires_action":True},
+        {"id":"e3","simulation_id":sim_id(),"from_name":cfg["teammate"]["name"],"from_role":cfg["teammate"]["role"],"from_email":cfg["teammate"]["email"],"to":"you","subject":"Insider notes before you touch the register","body":f"Hey, welcome. Quick map before you start moving things.\n\nThe register looks tidier than it is. Watch these:\n\n1. RSK-201 (Lumina, no BAA) is the real fire. It's unassigned because nobody wants to own bad news before the audit. Assign it and escalate — Elena would rather hear it from us than from Priya.\n2. RSK-203 got dropped into 'accepted' last week with no sign-off record. That's not an accepted risk, that's a hidden one. Pull it back to 'treating'.\n3. RSK-206 is marked 'closed' but the bucket is public AGAIN. A recurrence is a reopen, not a duplicate. Don't let the historical 'closed' entry fool you.\n4. RSK-210 IS correctly accepted — signed off, review date set. Leave it. Not everything is a trap; part of the job is knowing what's actually fine.\n\nOn the Control Library: the fastest way to fail an audit is to mark things 'implemented' to make the list look complete. Priya samples. If CC6.1 says implemented and 12 accounts have no MFA, that's an exception AND a credibility hit on every other 'implemented' line. Mark honestly, evidence what's real.\n\nRaj (eng) will fight you on MFA. Don't cave, don't steamroll — offer a compensating control and a deadline.\n\nAnd when Sales sends the customer questionnaire: accurate answers only. I've watched a 'yes we encrypt everything' come back to bite us in a contract dispute. 'Encrypted at rest and in transit, access reviews quarterly, SOC 2 Type II in progress' is true and sellable. 'Fully compliant' is neither.\n\nPing me before you change any control status.\n\n{cfg['teammate']['name'].split()[0]}","time":"08:55","read":False,"replied":False,"priority":"high","category":"teammate","requires_action":False},
+        {"id":"e4","simulation_id":sim_id(),"from_name":cfg["director"]["name"],"from_role":cfg["director"]["role"],"from_email":cfg["director"]["email"],"to":"you","subject":"Risk committee Thursday — I want it true, not tidy","body":f"Welcome aboard.\n\nThe risk committee meets Thursday, same day fieldwork starts. I'll present the register.\n\nOne ask: I need it to be TRUE. If the Lumina BAA gap is real, it goes in the pack as a critical, with an owner and a plan. Do not let anyone 'close' or downgrade a real risk to keep the heat map green before a board meeting. I would infinitely rather walk in with an ugly, honest register than a clean one that falls apart under audit.\n\nGet me the BAA situation and the access-review status by end of day.\n\n{cfg['director']['name']}\nCISO","time":"09:00","read":False,"replied":False,"priority":"high","category":"info","requires_action":True},
+        {"id":"e5","simulation_id":sim_id(),"from_name":"Raj Malhotra","from_role":"Staff Engineer","from_email":"r.malhotra@halcyonhealth.io","to":"you","subject":"Re: MFA on admin accounts — this will slow us down","body":"Saw the ticket about forcing MFA on the 12 admin accounts. Pushing back.\n\nWe deploy 20+ times a day. Adding an MFA prompt to every prod action adds friction and we'll end up sharing a bypass, which is worse. The old GRC person let us run without it because we're behind the VPN anyway.\n\nCan we just accept this risk and move on? Happy to revisit after the launch.\n\nRaj","time":"09:15","read":False,"replied":False,"priority":"high","category":"client","requires_action":True},
+        {"id":"e6","simulation_id":sim_id(),"from_name":"Tom Bridgewater","from_role":"Enterprise Account Executive","from_email":"t.bridgewater@halcyonhealth.io","to":"you","subject":"URGENT: security questionnaire for the Mercy Health deal","body":"Need your help to close Mercy Health (£480k ARR, signing Friday). Their security team sent a questionnaire — attached. I've pre-filled it to make us look good; just need GRC to rubber-stamp.\n\nI put 'Yes' for: fully HIPAA compliant, SOC 2 certified, all data encrypted, annual pen tests, 24/7 SOC. Can you sign off so I can send it back today?\n\nHonestly the wording doesn't need to be perfect — they just want to see green ticks. Don't overthink it, the deal's waiting.\n\nTom","time":"09:20","read":False,"replied":False,"priority":"high","category":"client","requires_action":True},
+        {"id":"e7","simulation_id":sim_id(),"from_name":"HR Onboarding","from_role":"HR","from_email":"hr@halcyonhealth.io","to":"you","subject":"New starter onboarding tasks","body":"Welcome! Please complete by EOD:\n1. HIPAA & PHI handling training (60 min) — BLOCKER for any risk/control work touching patient data\n2. Information Security policy acknowledgement\n3. GRC tooling training (risk register + control library)\n4. Code of conduct + confidentiality agreement\n\nEmployee ID: HH-2207","time":"08:25","read":False,"replied":False,"priority":"medium","category":"onboarding","requires_action":True},
+        {"id":"e8","simulation_id":sim_id(),"from_name":cfg["it"]["name"],"from_role":cfg["it"]["role"],"from_email":cfg["it"]["email"],"to":"you","subject":"Tool access","body":f"Your access:\n- Risk Register (GRC platform): editor\n- Control Library / evidence store: editor\n- Vanta / audit workspace: read\n- Jira (IT tickets): create\n- Slack: #grc, #security, #general\n- Read-only: AWS config, IAM access reports\n\n{cfg['it']['name']}","time":"08:00","read":False,"replied":False,"priority":"low","category":"info","requires_action":False},
+    ])
+    tasks_col.insert_many([
+        {"id":"t1","simulation_id":sim_id(),"title":"Complete onboarding (HIPAA, InfoSec policy, GRC tools)","description":"4 onboarding items. HIPAA training is a blocker for any work touching PHI (RSK-201, RSK-209).","priority":"medium","deadline":"17:00","status":"pending","points":10},
+        {"id":"t2","simulation_id":sim_id(),"title":"Triage RSK-201 — assign owner + escalate the BAA gap","description":"PHI to Lumina with no BAA. Assign an owner (Security/Legal), escalate to the CISO, move to 'treating'. Do NOT close or downgrade.","priority":"high","deadline":"11:00","status":"pending","points":30},
+        {"id":"t3","simulation_id":sim_id(),"title":"Pull back RSK-203 — invalid risk acceptance","description":"Moved to 'accepted' with no sign-off. Return to 'treating' and either remediate or obtain a documented owner sign-off.","priority":"high","deadline":"12:00","status":"pending","points":22},
+        {"id":"t4","simulation_id":sim_id(),"title":"Respond to auditor PBC — collect real evidence","description":"Gather CC6.1, CC6.3, A.9.2, CC9.2, 164.308 evidence within the audit period. Where a control wasn't operating, document the exception — do not fabricate or back-date.","priority":"high","deadline":"15:00","status":"pending","points":25},
+        {"id":"t5","simulation_id":sim_id(),"title":"Fix Control Library statuses to match evidence","description":"Downgrade CC6.1 and CC1.4 and 164.308 to honest statuses. Reassign CC6.2 (orphaned owner). Never mark 'implemented' without current evidence.","priority":"high","deadline":"14:00","status":"pending","points":25},
+        {"id":"t6","simulation_id":sim_id(),"title":"Negotiate MFA control with Raj (RSK-202)","description":"Don't accept the risk, don't steamroll. Offer a compensating control (hardware keys / SSO conditional access) + a hard 2-week deadline. Document it.","priority":"high","deadline":"13:00","status":"pending","points":22},
+        {"id":"t7","simulation_id":sim_id(),"title":"Answer the Mercy Health security questionnaire — accurately","description":"Do NOT rubber-stamp Tom's 'all yes'. We are SOC 2 Type II IN PROGRESS (not certified), encrypted at rest+transit, quarterly access reviews. State gaps honestly. Overstating is misrepresentation.","priority":"high","deadline":"16:00","status":"pending","points":20},
+        {"id":"t8","simulation_id":sim_id(),"title":"Reopen RSK-206 — recurred public bucket","description":"Move out of 'closed' to 'treating', raise an IT ticket to lock the bucket, add config monitoring so recurrence is auto-detected.","priority":"medium","deadline":"tomorrow","status":"pending","points":18},
+        {"id":"t9","simulation_id":sim_id(),"title":"Re-assess RSK-205 — expired vendor review","description":"Move from 'monitoring' back to 'assessing'. Request the vendor's current SOC 2 report, re-score once you have current evidence.","priority":"medium","deadline":"tomorrow","status":"pending","points":15},
+    ])
+    _seed_grc_artifacts(cfg)
+
 SEED_FUNCTIONS = {
     "accountant": seed_accountant,
     "cybersecurity": seed_cybersecurity,
@@ -2366,6 +2550,7 @@ SEED_FUNCTIONS = {
     "procurement": seed_procurement,
     "hr": seed_hr,
     "pm": seed_pm,
+    "grc": seed_grc,
 }
 
 def init_session(career, experience_level: str = "experienced"):
@@ -2499,7 +2684,7 @@ def manager_review_task(task_id: str, verdict: str, feedback: str) -> str:
 
 @tool
 def get_tool_data(tool_name: str) -> str:
-    """Get data from a career-specific tool: sage_bank, sage_ledger, sage_invoices, siem_alerts, jira_tickets, campaigns, po_approvals, vendor_catalog, training_programs, learner_pipeline, roadmap, feature_requests."""
+    """Get data from a career-specific tool: sage_bank, sage_ledger, sage_invoices, siem_alerts, jira_tickets, campaigns, po_approvals, vendor_catalog, training_programs, learner_pipeline, roadmap, feature_requests, risk_register, control_library."""
     if tool_name == "sage_bank":
         s = sheets_col.find_one({"simulation_id": sim_id()}, {"_id": 0})
         if not s: return "No data."
@@ -2570,6 +2755,18 @@ def get_tool_data(tool_name: str) -> str:
         if not t: return "No requests."
         rows = (t.get("data") or {}).get("rows", [])
         return "\n".join([f"{r['req_id']} | {r['title']} | src={r['source']} | by={r['requester']} | customers={r['customers_affected']} | ARR £{r['arr_impact_gbp']:,} | status={r['status']}{' dupe→'+r['dupe_of'] if r.get('dupe_of') else ''}" for r in rows])
+    elif tool_name == "risk_register":
+        if tools_col is None: return "No data."
+        t = tools_col.find_one({"simulation_id": sim_id(), "name": "Risk Register"}, {"_id": 0})
+        if not t: return "No risk register."
+        cards = (t.get("data") or {}).get("cards", [])
+        return "\n".join([f"{c['id']} | {c['title']} | framework={c.get('framework','-')} | L={c.get('likelihood','-')}/I={c.get('impact','-')} residual={c.get('residual','-')} | owner={c.get('owner','-')} | col={c['column']} | flags={','.join(c.get('risk_flags',[])) or 'none'}" for c in cards])
+    elif tool_name == "control_library":
+        if tools_col is None: return "No data."
+        t = tools_col.find_one({"simulation_id": sim_id(), "name": "Control Library"}, {"_id": 0})
+        if not t: return "No control library."
+        rows = (t.get("data") or {}).get("rows", [])
+        return "\n".join([f"{r['control_id']} ({r.get('framework','-')}) | {r['title']} | owner={r.get('owner','-')} | status={r['status']} | last_tested={r.get('last_tested','-')} | evidence={r.get('evidence','-')}" for r in rows])
     elif tool_name == "slack":
         msgs = list(slack_col.find({"simulation_id": sim_id()}, {"_id": 0}).sort("ts", -1).limit(80))
         msgs.reverse()
@@ -3040,6 +3237,8 @@ _LEVEL_INSTRUCTIONS = {
         "- Learner Pipeline: 'This lists every active and requested learner across all programmes — their completion %, due date, and crucially, their manager. For compliance training, ALWAYS chase the manager not the learner — completion patterns are manager-led, and threatening learners directly backfires.'\n"
         "- Roadmap: 'This is the product roadmap kanban — every feature, experiment, and bet lives here as a card moving through backlog → discovery → in_build → in_review → launched → parked. Your job is to put each card in the column that actually reflects evidence (not enthusiasm), and to PARK things that should not be on the roadmap, with rationale. The classic mistakes: keeping a broken experiment in launched, promising backlog items to Sales to win a deal, killing a card without writing down why.'\n"
         "- Feature Requests: 'This is the inbound list — every ask from Sales, CS, and internal teams. For each row look at: how many customers actually asked, ARR impact, whether it duplicates something already in flight, and whether it is even your team\\'s scope. Most requests are dupes or single-customer asks dressed up as roadmap items. Triage by evidence, not by who shouted loudest.'\n"
+        "- Risk Register: 'This is the risk kanban — every risk moves through identified → assessing → treating → monitoring → accepted → closed. The column must match the evidence: a risk is only ACCEPTED when the accountable owner has signed a risk-acceptance record, and only CLOSED when the treatment is verified and it has not recurred. The cardinal sins: closing a real risk to make the heat map green before a board meeting, letting a risk sit in accepted with no sign-off, and leaving a critical risk unassigned. When in doubt, escalate — a known risk owned by someone is always safer than a hidden one.'\n"
+        "- Control Library: 'This is the SOC 2 / HIPAA / ISO control list the auditor samples. A control is only IMPLEMENTED if there is current, in-period evidence for it — not because someone believes it works. If MFA is 'implemented' but 12 admins have it off, that is not implemented, it is an exception waiting to be found. The unforgivable mistake in this job is inflating a status or fabricating/back-dating evidence to make the list look complete; a documented gap is always better than evidence that collapses under sampling.'\n"
         "Always explain WHY a thing matters, not just WHAT to do.\n"
         "Teammate is HELPFUL not challenging for the first 5 user interactions; only after that does Priya/Mike/etc. start challenging the user's approach.\n"
         "Manager checks in more frequently with light-touch nudges: 'How are you getting on? Any questions about the reconciliation process?'\n"
@@ -3109,7 +3308,7 @@ PROGRESSIVE WORK INJECTION (the day must NEVER run out of work):
 - Difficulty escalates each round. Tone of new emails escalates: routine → urgent → high-stakes.
 
 AVAILABLE TOOLS FOR THIS CAREER: {', '.join(cfg['tools'])}
-Use get_tool_data with: {'sage_bank, sage_ledger, sage_invoices' if career=='accountant' else 'siem_alerts' if career=='cybersecurity' else 'campaigns' if career=='marketing' else 'po_approvals, vendor_catalog' if career=='procurement' else 'training_programs, learner_pipeline' if career=='hr' else 'roadmap, feature_requests' if career=='pm' else 'jira_tickets'}
+Use get_tool_data with: {'sage_bank, sage_ledger, sage_invoices' if career=='accountant' else 'siem_alerts' if career=='cybersecurity' else 'campaigns' if career=='marketing' else 'po_approvals, vendor_catalog' if career=='procurement' else 'training_programs, learner_pipeline' if career=='hr' else 'roadmap, feature_requests' if career=='pm' else 'risk_register, control_library' if career=='grc' else 'jira_tickets'}
 
 NEVER do their work. Create pressure. Be realistic. Start as {cfg['manager']['name']} welcoming them — tell them to check Outlook."""
 
@@ -3727,7 +3926,7 @@ class ChatReq(BaseModel):
     message: SafeStr = Field(..., min_length=1, max_length=2000)
 
 class CareerReq(BaseModel):
-    career: str = Field(..., pattern=r"^(accountant|cybersecurity|marketing|developer|procurement|hr|pm)$")
+    career: str = Field(..., pattern=r"^(accountant|cybersecurity|marketing|developer|procurement|hr|pm|grc)$")
     experience_level: str = Field("experienced", pattern=r"^(experienced|studied|beginner)$")
 
 class ReplyReq(BaseModel):
@@ -4166,6 +4365,8 @@ async def start_career(req: CareerReq, request: Request):
             _seed_hr_artifacts(cfg)
         elif req.career == "pm":
             _seed_pm_artifacts(cfg)
+        elif req.career == "grc":
+            _seed_grc_artifacts(cfg)
         elif req.career == "cybersecurity":
             _seed_cybersecurity_artifacts(cfg)
 
@@ -5274,6 +5475,17 @@ _TOOL_TOOLTIPS: dict[str, dict[str, str]] = {
         "IMPACT": "Estimated business impact (low/medium/high) BEFORE we ship. Compare with actual post-launch — it's how you calibrate over time.",
         "EFFORT_WEEKS": "Eng effort estimate. Combined with impact gives you the cost/value lens for prioritisation.",
         "SQUAD": "Which squad delivers it. If it's not your squad's scope, route it — don't put it on your roadmap to be helpful.",
+        # GRC Risk Register kanban columns / fields:
+        "IDENTIFIED": "Risk logged but not yet analysed. A critical risk should never sit here unassigned — give it an owner and move it to assessing/treating.",
+        "ASSESSING": "Scoring likelihood × impact and gathering context. Expired vendor reviews and un-scoped risks belong here, not in monitoring.",
+        "TREATING": "A remediation or mitigation plan is being executed, with an owner and a deadline. Most live risks should be here.",
+        "MONITORING": "Treated down to acceptable residual, now watched for change. Only put things here that genuinely have a working control — not open questions.",
+        "ACCEPTED": "The org has formally chosen to live with this risk — but ONLY valid with a documented sign-off from the accountable owner. No sign-off = it does not belong in accepted.",
+        "CLOSED": "Treatment verified and the risk is gone. If a 'closed' risk recurs, REOPEN it — don't leave it closed because a matching historical entry exists.",
+        "LIKELIHOOD": "How probable the risk is (low/medium/high). Combined with impact gives the risk score.",
+        "IMPACT": "Severity if it happens. A PHI/BAA gap is 'critical' regardless of likelihood — regulatory exposure dominates.",
+        "RESIDUAL": "The risk level AFTER controls. This is what goes to the risk committee — inherent minus the effect of treatment.",
+        "FRAMEWORK": "Which standard this maps to (SOC 2 / HIPAA / ISO 27001). Tells you whether the auditor will test it directly.",
     },
     "table": {  # Sage spreadsheet + Vendor catalog
         "DATE": "When the transaction happened. Match against the bank statement to find missing or mis-dated entries.",
@@ -5309,6 +5521,13 @@ _TOOL_TOOLTIPS: dict[str, dict[str, str]] = {
         "DUE_DATE": "Hard deadline (compliance) or soft target (upskilling). For compliance, missed = audit finding.",
         "COMPLETION_PCT": "% of modules finished. <30% near due date = needs a manager nudge. 0% across a whole team = the manager themselves haven't done it.",
         "MANAGER": "The learner's line manager. THIS is who you escalate to — never the learner directly.",
+        # GRC Control Library table columns:
+        "CONTROL_ID": "The control's reference (e.g. CC6.1, 164.308, A.9.2). Use it when replying to the auditor's PBC list.",
+        "FRAMEWORK": "Which standard the control belongs to (SOC 2 / HIPAA / ISO 27001). A control can map to more than one — evidence usually satisfies all of them.",
+        "STATUS": "implemented (current in-period evidence exists) / partial (works but evidence is incomplete or a gap remains) / needs_evidence / not_implemented. NEVER mark 'implemented' without evidence — the auditor samples and one bad line discredits the rest.",
+        "LAST_TESTED": "When the control was last verified. Evidence outside the audit period doesn't count — a control tested 14 months ago is effectively untested for this audit.",
+        "EVIDENCE": "The artefact proving the control operates (config export, ticket sample, review record). 'none' or 'stale' means the status can't honestly be 'implemented'.",
+        "OWNER": "Who is accountable for the control. An owner who has left the company = an orphaned control with no one accountable; reassign before fieldwork.",
     },
     "campaigns": {
         "STATUS": "draft → scheduled → live → completed/paused. Only 'approved' campaigns can go live.",
@@ -5358,7 +5577,7 @@ async def api_reputation():
 ADMIN_TOKEN = os.environ.get("ADMIN_TOKEN", "")
 
 class IngestReq(BaseModel):
-    career: str = Field(..., pattern=r"^(accountant|cybersecurity|marketing|developer|procurement|hr|pm)$")
+    career: str = Field(..., pattern=r"^(accountant|cybersecurity|marketing|developer|procurement|hr|pm|grc)$")
     source: Optional[str] = Field(None, pattern=r"^(seed_file|adzuna)$")
     limit: int = Field(5, ge=1, le=20)
 
@@ -5477,21 +5696,22 @@ def _fetch_jd_from_url(url: str) -> tuple[str, str]:
     return title[:200], text[:8000]
 
 _CAREER_CLASSIFIER_PROMPT = (
-    "You classify a job description into ONE of seven workplace simulator careers. "
+    "You classify a job description into ONE of eight workplace simulator careers. "
     "Pick the SINGLE closest fit. Reply with ONE word only.\n"
     "- accountant: finance, accounting, AP/AR, bookkeeping, audit, controller, FP&A, treasury, payroll\n"
-    "- cybersecurity: SOC analyst, security engineer, infosec, threat detection, incident response, GRC, SIEM\n"
+    "- cybersecurity: SOC analyst, security engineer, infosec, threat detection, incident response, SIEM, blue team, detection engineering\n"
     "- marketing: marketing, growth, content, SEO, brand, social, demand gen, comms, PR, copywriter, sales/SDR/BDR/AE/CSM (closest match for sales roles)\n"
     "- developer: software engineer, backend, frontend, full-stack, mobile, devops, SRE, data engineer, ML engineer, QA\n"
     "- procurement: procurement, sourcing, vendor management, supply chain, purchasing, contracts, operations/ops (closest match)\n"
     "- hr: HR, people, L&D, talent, recruiting, training, organisational development, employee relations\n"
     "- pm: product manager, product owner, UX designer, product designer, researcher, business analyst, data analyst (closest match)\n"
+    "- grc: GRC analyst, governance risk & compliance, compliance analyst, risk analyst, IT auditor, SOC 2 / ISO 27001 / HIPAA, internal controls, audit readiness, third-party/vendor risk, information security compliance\n"
     "If unclear, default to the closest functional fit. Reply with EXACTLY one word from this list."
 )
-_VALID_CAREERS = {"accountant", "cybersecurity", "marketing", "developer", "procurement", "hr", "pm"}
+_VALID_CAREERS = {"accountant", "cybersecurity", "marketing", "developer", "procurement", "hr", "pm", "grc"}
 
 def _classify_career_from_jd(jd_text: str, title: str = "") -> str:
-    """Pick the closest of the 7 careers for a free-form JD. Falls back to 'pm' on failure."""
+    """Pick the closest of the 8 careers for a free-form JD. Falls back to 'pm' on failure."""
     snippet = (title + "\n\n" + (jd_text or ""))[:3000].strip()
     if not snippet:
         return "pm"
@@ -5507,7 +5727,7 @@ def _classify_career_from_jd(jd_text: str, title: str = "") -> str:
     return "pm"
 
 class JDIngestReq(BaseModel):
-    career: str = Field("auto", pattern=r"^(auto|accountant|cybersecurity|marketing|developer|procurement|hr|pm)$")
+    career: str = Field("auto", pattern=r"^(auto|accountant|cybersecurity|marketing|developer|procurement|hr|pm|grc)$")
     experience_level: str = Field("experienced", pattern=r"^(experienced|studied|beginner)$")
     url: Optional[str] = Field(None, max_length=2000)
     text: Optional[str] = Field(None, max_length=20000)
@@ -6185,6 +6405,7 @@ DEFAULT_SLACK_CHANNELS_BY_CAREER: dict = {
     "procurement":   ("#procurement", "#it-finance", "#general"),
     "hr":            ("#people-ld", "#people-ops", "#general"),
     "pm":            ("#growth", "#product", "#general"),
+    "grc":           ("#grc", "#security", "#general"),
 }
 
 # ── CROSS-TOOL EVENT HANDLERS for multi-tool tasks ───────────────
