@@ -5605,6 +5605,195 @@ async def api_grc():
         },
     }
 
+# ── ComplianceHub write-backs (mirror /triage and /note) ──────────
+def _grc_find_control(control_id: str):
+    return grc_col.find_one({"simulation_id": sim_id(), "doc_type": "control", "control_id": control_id})
+
+def _grc_find_pbc(pbc_id: str):
+    return grc_col.find_one({"simulation_id": sim_id(), "doc_type": "pbc", "pbc_id": pbc_id})
+
+def _grc_recompute_control_status(ctrl: dict, cur: int) -> str:
+    """A control passes once it has a genuinely-accepted evidence item (one
+    that is NOT silently arming an exception). Otherwise it stays awaiting,
+    with the due_soon overlay applied. Only ever called on controls that
+    carry evidence, so failing/passing controls are never disturbed."""
+    valid = [e for e in ctrl.get("evidence_items", [])
+             if e.get("status") == "accepted" and not e.get("pending_exception_day")]
+    if valid:
+        return "passing"
+    edd = ctrl.get("evidence_due_day")
+    if edd is not None and (edd - cur) <= 2:
+        return "due_soon"
+    return "needs_evidence"
+
+def _grc_fire_physics(key: Optional[str], ctx: dict) -> list[dict]:
+    """Fire a workplace-physics cascade for a GRC action. Rules land in Step 7;
+    until then engine.process returns [] for unknown keys (graceful no-op).
+    performance_note triggers are skipped — these endpoints score their own points."""
+    if not key:
+        return []
+    try:
+        sess = sessions_col.find_one({"session_id": session_id()}, {"_id": 0}) or {}
+        cfg = CAREER_CONFIGS.get(get_career() or "grc", CAREER_CONFIGS["grc"])
+        engine = WorkplacePhysicsEngine(
+            emails_col=emails_col, tasks_col=tasks_col, tools_col=tools_col,
+            slack_col=slack_col, evals_col=evals_col, jira_col=jira_col,
+            sessions_col=sessions_col, career_config=cfg,
+            sim_id=sim_id(), session_id=session_id(),
+            user_id=sess.get("user_id") or "anon",
+            user_name=sess.get("user_name") or sess.get("name") or "the analyst")
+        return engine.process(key, ctx, skip_types={"performance_note"})
+    except Exception as ex:
+        log.warning("grc.physics.fail key=%s err=%s", key, ex)
+        return []
+
+def _grc_score(control_id: str, ev_id: str, verdict: str, reason, correct: bool, pts: int):
+    evals_col.insert_one({
+        "simulation_id": sim_id(), "type": "grc_verdict", "source": "grc_verdict",
+        "control_id": control_id, "ev_id": ev_id, "verdict": verdict, "reason": reason,
+        "correct": correct, "points": pts, "ts": datetime.utcnow().isoformat()})
+    if pts:
+        sessions_col.update_one({"session_id": session_id()}, {"$inc": {"score_adj": pts}})
+
+def _grc_current_readiness() -> int:
+    cur = _current_day()
+    docs = list(grc_col.find({"simulation_id": sim_id(), "day": {"$lte": cur}}, {"_id": 0}))
+    return _grc_readiness([_grc_public_control(d, cur) for d in docs if d.get("doc_type") == "control"])
+
+class GrcVerdictReq(BaseModel):
+    verdict: str = Field(..., pattern=r"^(accept|reject)$")
+    reject_reason: Optional[str] = Field(None, pattern=r"^(wrong_period|missing_approver|insufficient_source|wrong_scope)$")
+    rationale: SafeStr = Field("", max_length=2000)
+    criteria_checked: list[str] = Field(default_factory=list)
+
+@app.post("/api/grc/{control_id}/evidence/{ev_id}/verdict")
+async def api_grc_verdict(control_id: str, ev_id: str, body: GrcVerdictReq):
+    ctrl = _grc_find_control(control_id)
+    if not ctrl:
+        raise HTTPException(404, "Control not found")
+    ev = next((e for e in ctrl.get("evidence_items", []) if e.get("ev_id") == ev_id), None)
+    if not ev:
+        raise HTTPException(404, "Evidence not found")
+    if len((body.rationale or "").strip()) < 20:
+        raise HTTPException(400, detail={"error": "rationale_required",
+            "message": "A documented rationale of at least 20 characters is required to disposition evidence."})
+    if body.verdict == "reject" and not body.reject_reason:
+        raise HTTPException(400, detail={"error": "reject_reason_required",
+            "message": "Rejecting evidence requires a reject reason."})
+    if ev.get("status") in ("accepted", "rejected", "exception_recorded"):
+        return {"ok": True, "already": ev["status"], "message": "Evidence already dispositioned.",
+                "evidence_status": ev["status"], "control_status": ctrl.get("status"),
+                "readiness_pct": _grc_current_readiness(), "effects": []}
+
+    is_flawed = bool(ev.get("is_flawed"))
+    correct_reason = ev.get("correct_reject_reason")
+    pc = int(ev.get("points_correct") or 0)
+    cur = _current_day()
+    physics_key = None
+    ev["verdict_rationale"] = (body.rationale or "").strip()
+    ev["verdict_criteria"] = list(body.criteria_checked or [])[:8]
+    ev["verdict_day"] = cur
+
+    if body.verdict == "accept":
+        ev["status"] = "accepted"
+        ev["verdict"] = "accept"
+        if is_flawed:
+            # ACCEPT-FLAWED — do nothing visible; arm the delayed exception (Step 6 detonates).
+            ev["pending_exception_day"] = cur + 2
+            # no eval, no score, no email — silence is the mechanic.
+        else:
+            # ACCEPT-CLEAN — reward + readiness ticks up.
+            _grc_score(control_id, ev_id, "accept", None, True, pc)
+    else:  # reject
+        ev["status"] = "rejected"
+        ev["verdict"] = "reject"
+        ev["verdict_reason"] = body.reject_reason
+        if is_flawed:
+            if body.reject_reason == correct_reason:
+                # REJECT-CORRECT (right reason) — full points; owner sends corrected evidence at rollover.
+                _grc_score(control_id, ev_id, "reject", body.reject_reason, True, pc)
+                ev["correction_owed_day"] = cur + 1
+            else:
+                # REJECT-CORRECT (wrong reason) — half points; auditor nudge deferred to rollover.
+                _grc_score(control_id, ev_id, "reject", body.reject_reason, True, max(1, pc // 2))
+        else:
+            # REJECT-CLEAN — the evidence was fine; small penalty + owner pushes back now.
+            _grc_score(control_id, ev_id, "reject", body.reject_reason, False, -5)
+            physics_key = "grc.evidence_rejected_clean"
+
+    new_ctrl_status = _grc_recompute_control_status(ctrl, cur)
+    grc_col.update_one({"_id": ctrl["_id"]},
+                       {"$set": {"evidence_items": ctrl["evidence_items"], "status": new_ctrl_status}})
+
+    effects = _grc_fire_physics(physics_key, {
+        "ev_id": ev_id, "control_id": control_id, "control_title": ctrl.get("title"),
+        "owner": ctrl.get("owner"), "reject_reason": body.reject_reason or ""})
+
+    # Diegetic response — never states correct/wrong. Consequences arrive in-world.
+    return {"ok": True, "verdict": body.verdict, "evidence_status": ev["status"],
+            "control_status": new_ctrl_status, "readiness_pct": _grc_current_readiness(),
+            "effects": effects, "message": ("Evidence accepted and attached to " + control_id + "."
+                                            if body.verdict == "accept" else
+                                            "Evidence rejected. A correction request has been logged.")}
+
+@app.post("/api/grc/{pbc_id}/request")
+async def api_grc_request(pbc_id: str):
+    p = _grc_find_pbc(pbc_id)
+    if not p:
+        raise HTTPException(404, "PBC item not found")
+    if (p.get("chase_state") or 0) >= 1:
+        raise HTTPException(400, detail={"error": "already_requested", "message": "This item has already been requested."})
+    cur = _current_day()
+    grc_col.update_one({"_id": p["_id"]},
+        {"$set": {"chase_state": 1, "status": "requested"},
+         "$push": {"chase_log": {"day": cur, "action": "requested"}}})
+    return {"ok": True, "chase_state": 1, "status": "requested", "effects": []}
+
+@app.post("/api/grc/{pbc_id}/remind")
+async def api_grc_remind(pbc_id: str):
+    p = _grc_find_pbc(pbc_id)
+    if not p:
+        raise HTTPException(404, "PBC item not found")
+    st = p.get("chase_state") or 0
+    if st < 1:
+        raise HTTPException(400, detail={"error": "not_requested",
+            "message": "Request this item before reminding — you can't chase something you never asked for."})
+    cur = _current_day()
+    new_st = max(st, 2)
+    grc_col.update_one({"_id": p["_id"]},
+        {"$set": {"chase_state": new_st, "status": "chasing"},
+         "$push": {"chase_log": {"day": cur, "action": "reminded"}}})
+    eff = _grc_fire_physics("grc.reminder_sent", {"pbc_id": pbc_id, "owner": p.get("owner"), "request": p.get("request")})
+    return {"ok": True, "chase_state": new_st, "status": "chasing", "effects": eff}
+
+@app.post("/api/grc/{pbc_id}/escalate")
+async def api_grc_escalate(pbc_id: str):
+    p = _grc_find_pbc(pbc_id)
+    if not p:
+        raise HTTPException(404, "PBC item not found")
+    st = p.get("chase_state") or 0
+    cur = _current_day()
+    ctx = {"pbc_id": pbc_id, "owner": p.get("owner"), "request": p.get("request")}
+    if st < 2:
+        # Escalated before chasing properly — the follow-up-cadence lesson.
+        _grc_score_chase(pbc_id, "escalate_too_early", False, -5)
+        eff = _grc_fire_physics("grc.escalated_too_early", ctx)
+        return {"ok": True, "outcome": "escalated_too_early", "chase_state": st,
+                "message": "Escalated before chasing. Chase the owner properly first.", "effects": eff}
+    grc_col.update_one({"_id": p["_id"]},
+        {"$set": {"chase_state": 3, "status": "chasing", "evidence_owed_day": cur + 1},
+         "$push": {"chase_log": {"day": cur, "action": "escalated"}}})
+    eff = _grc_fire_physics("grc.escalated_properly", ctx)
+    return {"ok": True, "outcome": "escalated_properly", "chase_state": 3, "effects": eff}
+
+def _grc_score_chase(pbc_id: str, action: str, correct: bool, pts: int):
+    evals_col.insert_one({
+        "simulation_id": sim_id(), "type": "grc_chase", "source": "grc_chase",
+        "pbc_id": pbc_id, "action": action, "correct": correct, "points": pts,
+        "ts": datetime.utcnow().isoformat()})
+    if pts:
+        sessions_col.update_one({"session_id": session_id()}, {"$inc": {"score_adj": pts}})
+
 @app.get("/api/jira")
 async def api_jira():
     _day = _current_day()
