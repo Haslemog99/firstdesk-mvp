@@ -260,29 +260,42 @@ def _tag_day1_artifacts() -> None:
         except Exception:
             pass
 
-# ── EXPERIENCE-LEVEL SCORING WEIGHTS ─────────────────────────────
-# Same simulation, same difficulty for everyone. Only the score WEIGHT
-# changes based on user's stated experience level:
-#   experienced → standard scoring
-#   studied     → +10% on positive points (rewards proving competence)
-#   beginner    → first mistake per tool-kind costs 0pts (learning curve);
-#                 subsequent mistakes use the full penalty.
+# ── EXPERIENCE-LEVEL = DIFFICULTY TIER ───────────────────────────
+# The three levels are genuine difficulty tiers, not just tone changes.
+# This table drives scoring; time pressure (_REAL_DAY_SEC_BY_LEVEL) and
+# trap injection (_LEVEL_TRAPS) live near their own subsystems.
+#   beginner    (easy)   → penalties softened, first mistake per kind free,
+#                          small positive boost. Room to learn.
+#   studied     (medium) → standard scoring, no forgiveness. The baseline.
+#   experienced (hard)   → penalties amplified, no forgiveness. No room for error.
+_LEVEL_SCORING = {
+    "beginner":    {"pos_mult": 1.05, "neg_mult": 0.40, "forgive_first": True},
+    "studied":     {"pos_mult": 1.00, "neg_mult": 1.00, "forgive_first": False},
+    "experienced": {"pos_mult": 1.00, "neg_mult": 1.50, "forgive_first": False},
+}
+
+def _level_scoring(level: str) -> dict:
+    return _LEVEL_SCORING.get(level, _LEVEL_SCORING["studied"])
+
 def _apply_level_weight(pts: int, action_kind: str) -> int:
-    """Adjust raw points based on the session's experience_level.
+    """Adjust raw points based on the session's experience_level (difficulty tier).
     action_kind is a short tag like 'siem' / 'sage_disc' / 'task' that
     identifies the tool family for the beginner first-mistake forgiveness."""
     sess = sessions_col.find_one({"session_id": session_id()}, {"_id": 0, "experience_level": 1, "beginner_first_mistakes": 1}) or {}
-    level = sess.get("experience_level", "experienced")
-    if level == "studied" and pts > 0:
-        return int(round(pts * 1.10))
-    if level == "beginner" and pts < 0:
-        forgiven = sess.get("beginner_first_mistakes") or []
-        if action_kind not in forgiven:
-            sessions_col.update_one(
-                {"session_id": session_id()},
-                {"$addToSet": {"beginner_first_mistakes": action_kind}},
-            )
-            return 0  # first mistake on this tool family is free
+    level = sess.get("experience_level", "studied")
+    cfg = _level_scoring(level)
+    if pts > 0:
+        return int(round(pts * cfg["pos_mult"]))
+    if pts < 0:
+        if cfg["forgive_first"]:
+            forgiven = sess.get("beginner_first_mistakes") or []
+            if action_kind not in forgiven:
+                sessions_col.update_one(
+                    {"session_id": session_id()},
+                    {"$addToSet": {"beginner_first_mistakes": action_kind}},
+                )
+                return 0  # first mistake on this tool family is free
+        return int(round(pts * cfg["neg_mult"]))
     return pts
 
 # ── PER-IP RATE LIMIT ────────────────────────────────────────────
@@ -2773,7 +2786,7 @@ SEED_FUNCTIONS = {
     "grc": seed_grc,
 }
 
-def init_session(career, experience_level: str = "experienced"):
+def init_session(career, experience_level: str = "studied"):
     cfg = CAREER_CONFIGS[career]
     sessions_col.update_one(
         {"session_id": session_id()},
@@ -3349,9 +3362,14 @@ def _compute_eod():
             avg_task_min = sum(mins) if mins else 12
         else:
             avg_task_min = 12
-        if avg_task_min < 8: speed_pts += 4
-        elif avg_task_min < 12: speed_pts += 3
-        elif avg_task_min < 18: speed_pts += 2
+        # Thresholds are a FRACTION of the working day, not absolute minutes,
+        # so a shorter (harder) day isn't unfairly penalised. The ratios below
+        # are the original 8/12/18-minute marks over a 120-minute day.
+        day_min = _real_day_sec(s) / 60.0
+        frac = avg_task_min / max(1.0, day_min)
+        if frac < 8 / 120: speed_pts += 4
+        elif frac < 12 / 120: speed_pts += 3
+        elif frac < 18 / 120: speed_pts += 2
         else: speed_pts += 1
     # Email reply: proxy by reply_rate (no read→reply timestamps tracked yet).
     if reply_rate >= 0.8: speed_pts += 3
@@ -3430,18 +3448,30 @@ TOOLS = [get_inbox, read_email, send_reply, get_tasks, complete_task, manager_re
 
 _LEVEL_INSTRUCTIONS = {
     "experienced": (
-        "USER EXPERIENCE LEVEL: EXPERIENCED.\n"
-        "The user has worked in this role before. Do NOT explain basic concepts.\n"
-        "Be direct. Assign tasks and let them work. Only intervene if they make actual mistakes.\n"
-        "Manager tone: trusting, brief, treats them as a competent peer.\n"
-        "Teammate tone: collegial, can challenge ideas without hand-holding.\n"
+        "USER EXPERIENCE LEVEL: EXPERIENCED. This is the HARD tier.\n"
+        "The user has worked in this role before. Do NOT explain basic concepts, tools, or process.\n"
+        "Be direct and brief. Assign work and let them get on with it.\n"
+        "NO SAFETY NET — this is the important part:\n"
+        "- Do NOT warn them before they make a mistake. Let them make it, then hold them to it.\n"
+        "- Do NOT hint at the catch in a request. If something is a bad idea, they are expected to spot it.\n"
+        "- Do NOT volunteer the 'right' next step or re-prioritise their day for them.\n"
+        "Ask for things the way a busy colleague actually would: compressed, partial, "
+        "sometimes assuming context they have to go and find. Don't spell out acceptance criteria.\n"
+        "Manager tone: trusting but exacting. Notices slips. Short replies.\n"
+        "Teammate tone: peer who pushes back on weak reasoning and defends their own position "
+        "rather than folding the moment they're challenged.\n"
     ),
     "studied": (
-        "USER EXPERIENCE LEVEL: STUDIED (theoretical knowledge, no on-job experience).\n"
+        "USER EXPERIENCE LEVEL: STUDIED (theoretical knowledge, no on-job experience). "
+        "This is the MEDIUM tier — the realistic baseline.\n"
         "Agents give CONTEXT when introducing tasks but DO NOT do the work for them.\n"
         "Manager tone: supportive, drops short tips like 'start with the highest-priority items first'.\n"
         "When introducing a tool for the first time, ONE sentence on what it does, e.g. 'Open Sage — that's where our financial data lives.'\n"
         "Teammate tone: helpful, occasionally references textbook concepts so the user can map theory to practice.\n"
+        "Partial safety net: if the user is about to do something IRREVERSIBLE or seriously "
+        "unethical, a colleague may ask one clarifying question first ('you're sure you want to "
+        "close that one?') — but do NOT explain what the right answer is, and do not intervene "
+        "for ordinary mistakes.\n"
     ),
     "beginner": (
         "USER EXPERIENCE LEVEL: BEGINNER (no knowledge of this role).\n"
@@ -3462,13 +3492,213 @@ _LEVEL_INSTRUCTIONS = {
         "Always explain WHY a thing matters, not just WHAT to do.\n"
         "Teammate is HELPFUL not challenging for the first 5 user interactions; only after that does Priya/Mike/etc. start challenging the user's approach.\n"
         "Manager checks in more frequently with light-touch nudges: 'How are you getting on? Any questions about the reconciliation process?'\n"
-        "IMPORTANT: do NOT change the actual tasks, content, or difficulty — same simulation, same data. Only the agent EXPLANATION style changes.\n"
+        "FULL SAFETY NET: if the user is heading towards a mistake, a colleague warns them "
+        "BEFORE it lands, and says what to consider instead. Getting it wrong should teach, not punish.\n"
+        "State the priority order explicitly when they seem lost ('do X first, then Y').\n"
+        "The scenario content is the SAME as every other tier — the same emails, tasks and traps. "
+        "What changes is how much you explain, how early you warn, and how long they have.\n"
     ),
 }
 
-def build_prompt(career, experience_level: str = "experienced"):
+# ── LEVEL TRAP INJECTION (difficulty lever) ──────────────────────
+# Harder tiers get extra judgment tests layered onto the same day-1 scenario.
+# beginner: none. studied: the "studied" set. experienced: studied + experienced
+# (cumulative — the hard tier faces everything the medium tier does, plus more).
+# Each trap is a request that sounds reasonable and is not. There is always a
+# defensible refusal or escalation; complying is the scored mistake.
+_LEVEL_TRAPS: dict = {
+    "accountant": {
+        "studied": {"emails": [{
+            "id": "trap-acc-s1", "from_name": "James Crawford", "from_role": "Crawford & Sons Ltd",
+            "from_email": "j.crawford@crawfordsons.co.uk", "priority": "high", "category": "client",
+            "subject": "Quick favour on the £4,200",
+            "body": "Hi,\n\nThe £4,200 consultancy invoice landed in March but the work is really April's. "
+                    "Could you just book it to prepaid expenses so it doesn't hit this quarter? "
+                    "Keeps my numbers clean for the bank review.\n\nYou'd be doing me a big favour.\n\nJames",
+        }]},
+        "experienced": {"emails": [{
+            "id": "trap-acc-e1", "from_name": "David Chen", "from_role": "Senior Accountant",
+            "from_email": "d.chen@apexfinancial.com", "priority": "high", "category": "teammate",
+            "subject": "Rec — I've squared it off for you",
+            "body": "Saw you were still chasing that £1,180 gap on the March rec. I've put a balancing "
+                    "journal through so it ties out — honestly it's almost certainly a timing thing on "
+                    "the card settlements.\n\nCan you sign it off so I can close the period today? "
+                    "Sarah's asking.\n\nDave",
+        }]},
+    },
+    "cybersecurity": {
+        "studied": {"emails": [{
+            "id": "trap-cyb-s1", "from_name": "DataFlow Inc", "from_role": "CTO, DataFlow (client)",
+            "from_email": "cto@dataflow.io", "priority": "high", "category": "client",
+            "subject": "Need written confirmation today — no data left our systems",
+            "body": "Our board meets at 4pm and they want assurance in writing that no customer data "
+                    "was exfiltrated in last night's incident.\n\nCan you send me a one-liner confirming "
+                    "no data loss? I just need something I can forward.\n\nThanks",
+        }]},
+        "experienced": {"emails": [{
+            "id": "trap-cyb-e1", "from_name": "Tom Okafor", "from_role": "IT Infrastructure",
+            "from_email": "t.okafor@shieldwall.io", "priority": "high", "category": "internal",
+            "subject": "Whitelist 185.234.72.19 — blocking the backup job",
+            "body": "Our offsite backup target keeps getting flagged and the job's failing. "
+                    "Can you add 185.234.72.19 to the allow-list so tonight's run completes?\n\n"
+                    "It's just our storage vendor. I'd do it myself but I don't have SIEM rights.\n\nTom",
+        }]},
+    },
+    "marketing": {
+        "studied": {"emails": [{
+            "id": "trap-mkt-s1", "from_name": "NovaTech", "from_role": "Brand Partner",
+            "from_email": "marketing@novatech.com", "priority": "medium", "category": "client",
+            "subject": "Use the 97% stat in the launch creative",
+            "body": "Love the draft. One addition — please headline it with "
+                    "\"97% of customers would recommend NovaTech\".\n\nIt came out of our last survey. "
+                    "(Between us it was 12 responses, but the number's the number.)\n\nThanks!",
+        }]},
+        "experienced": {"emails": [{
+            "id": "trap-mkt-e1", "from_name": "Lisa Chen", "from_role": "Marketing Director",
+            "from_email": "l.chen@brightpath.co", "priority": "high", "category": "manager",
+            "subject": "Comparison ad — need it live tonight",
+            "body": "Sales want the competitor comparison running before their Q-end push. "
+                    "Copy says we're \"the only platform with real-time sync\".\n\n"
+                    "Two competitors do have it, but nobody's going to check, and legal sign-off "
+                    "takes three days we don't have. Get it scheduled.\n\nLisa",
+        }]},
+    },
+    "developer": {
+        "studied": {"emails": [{
+            "id": "trap-dev-s1", "from_name": "Priya Raman", "from_role": "Product Manager",
+            "from_email": "p.raman@codecraftlabs.io", "priority": "high", "category": "internal",
+            "subject": "BUG-301 — can we call it done?",
+            "body": "Demo's tomorrow 9am and BUG-301 is the only red on the board.\n\n"
+                    "The crash only happens on mobile Safari and we're demoing on Chrome. "
+                    "Can you move it to Done so the board's clean, and we'll properly fix it "
+                    "next sprint?\n\nPriya",
+        }]},
+        "experienced": {"emails": [{
+            "id": "trap-dev-e1", "from_name": "Marcus Feldman", "from_role": "Staff Engineer",
+            "from_email": "m.feldman@codecraftlabs.io", "priority": "high", "category": "teammate",
+            "subject": "Push the auth hotfix direct to main",
+            "body": "Prod's throwing 500s on login for about 8% of users. I've got a one-line fix "
+                    "but review takes 40 minutes and I'm about to get on a flight.\n\n"
+                    "Merge it straight to main for me — I've tested it locally. "
+                    "We can backfill the PR tomorrow.\n\nMarcus",
+        }]},
+    },
+    "procurement": {
+        "studied": {"emails": [{
+            "id": "trap-prc-s1", "from_name": "Danielle Vos", "from_role": "Account Exec, Vertex Software",
+            "from_email": "d.vos@vertexsoftware.com", "priority": "high", "category": "client",
+            "subject": "22% off if we paper it today",
+            "body": "Good news — I got you 22% off list, but my VP will only hold it until 5pm today.\n\n"
+                    "I know your security review is still open. Sign the order form now and we can run "
+                    "the review in parallel — nobody's ever failed it.\n\nDanielle",
+        }]},
+        "experienced": {"emails": [{
+            "id": "trap-prc-e1", "from_name": "Marcus Hale", "from_role": "Engineering Manager",
+            "from_email": "m.hale@techstack.co", "priority": "high", "category": "internal",
+            "subject": "Two POs for Vertex — keeping it simple",
+            "body": "Raising these as two separate requests to keep the paperwork light:\n\n"
+                    "  PO-4471  Vertex Software — 12 seats — £9,800\n"
+                    "  PO-4472  Vertex Software — 12 seats — £9,800\n\n"
+                    "Both under 10k so they only need your team lead, not the full Head of "
+                    "Procurement route. Saves us all a fortnight.\n\nMarcus",
+        }]},
+    },
+    "hr": {
+        "studied": {"emails": [{
+            "id": "trap-hr-s1", "from_name": "Greg Mallory", "from_role": "Head of Sales",
+            "from_email": "g.mallory@helixpeople.co", "priority": "high", "category": "internal",
+            "subject": "Just mark my team as complete",
+            "body": "My team are at 41% on the data-protection module and I'm getting chased.\n\n"
+                    "They all did this exact training at their last companies. Can you just mark "
+                    "the 14 of them complete in the LMS? It's a formality and they're in a "
+                    "quarter-end push.\n\nGreg",
+        }]},
+        "experienced": {"emails": [{
+            "id": "trap-hr-e1", "from_name": "Yvonne Adeyemi", "from_role": "VP Operations",
+            "from_email": "y.adeyemi@helixpeople.co", "priority": "high", "category": "internal",
+            "subject": "Need Daniel's training records — confidential",
+            "body": "I'm building a case to performance-manage Daniel out and I need his full "
+                    "learning history — every module, every score, every missed deadline.\n\n"
+                    "Send it straight to me rather than through HR, I don't want this on a "
+                    "formal file yet.\n\nYvonne",
+        }]},
+    },
+    "pm": {
+        "studied": {"emails": [{
+            "id": "trap-pm-s1", "from_name": "Hannah Boyd", "from_role": "Customer Success Lead",
+            "from_email": "h.boyd@northwindcloud.io", "priority": "high", "category": "internal",
+            "subject": "Meridian renewal — need bulk export on the roadmap",
+            "body": "Meridian (£240k ARR) renew in three weeks and their champion says bulk export "
+                    "is a dealbreaker.\n\nCan you get it onto the Q2 roadmap so I can put a date in "
+                    "front of them on Thursday? Even a rough one.\n\nHannah",
+        }]},
+        "experienced": {"emails": [{
+            "id": "trap-pm-e1", "from_name": "Mara Wells", "from_role": "CEO",
+            "from_email": "mara@northwindcloud.io", "priority": "high", "category": "manager",
+            "subject": "Leave the pricing test in Launched for the board pack",
+            "body": "I hear you're unwinding the pricing-page test. Fine — but the board deck goes "
+                    "out tonight and it's our only green Q1 win.\n\nLeave the card in Launched until "
+                    "after Thursday, then move it. Nobody reads the roadmap between now and then.\n\nMara",
+        }]},
+    },
+    "grc": {
+        "studied": {"emails": [{
+            "id": "trap-grc-s1", "from_name": "Marcus Feldman", "from_role": "GRC Analyst",
+            "from_email": "m.feldman@halcyonhealth.com", "priority": "high", "category": "teammate",
+            "subject": "Got Lumina's SOC 2 — filing it as evidence",
+            "body": "Chased Lumina and they sent their SOC 2 Type II. Report period ended "
+                    "14 months ago and they say the new one is \"in progress\".\n\n"
+                    "I'm going to attach it to the vendor control as current evidence so we can "
+                    "close that gap before fieldwork. Shout if you disagree, otherwise I'll file it.\n\nMarcus",
+        }]},
+        "experienced": {"emails": [{
+            "id": "trap-grc-e1", "from_name": "Dana Osei", "from_role": "GRC Manager",
+            "from_email": "d.osei@halcyonhealth.com", "priority": "high", "category": "manager",
+            "subject": "Priya's access-review sample — send Q3 only",
+            "body": "Priya's asked for access-review evidence across the full audit period.\n\n"
+                    "Q1 and Q2 were a mess — reviews ran late, some never happened. Q3 is clean.\n\n"
+                    "She only asked for a sample. Send her Q3 and if she wants more she can ask. "
+                    "No sense volunteering our own findings.\n\nDana",
+        }]},
+    },
+}
+
+def _inject_level_traps(career: str, level: str) -> int:
+    """Layer extra judgment tests onto day 1 for the harder tiers.
+
+    Cumulative: experienced faces the studied traps as well as its own.
+    Returns how many artefacts were inserted. Idempotent on `id`.
+    """
+    if level == "beginner":
+        return 0
+    tiers = ["studied"] if level == "studied" else ["studied", "experienced"]
+    packs = _LEVEL_TRAPS.get(career or "", {})
+    n = 0
+    for tier in tiers:
+        pack = packs.get(tier) or {}
+        for em in pack.get("emails", []):
+            if emails_col.find_one({"id": em["id"], "simulation_id": sim_id()}):
+                continue
+            emails_col.insert_one({
+                **em, "simulation_id": sim_id(), "to": "you",
+                "time": em.get("time", "09:40"), "read": False, "replied": False,
+                "requires_action": True, "level_trap": tier,
+            })
+            n += 1
+        for tk in pack.get("tasks", []):
+            if tasks_col.find_one({"id": tk["id"], "simulation_id": sim_id()}):
+                continue
+            tasks_col.insert_one({
+                **tk, "simulation_id": sim_id(), "status": "pending", "level_trap": tier,
+            })
+            n += 1
+    if n:
+        log.info("level_traps.injected career=%s level=%s count=%d", career, level, n)
+    return n
+
+def build_prompt(career, experience_level: str = "studied"):
     cfg = CAREER_CONFIGS[career]
-    level_block = _LEVEL_INSTRUCTIONS.get(experience_level, _LEVEL_INSTRUCTIONS["experienced"])
+    level_block = _LEVEL_INSTRUCTIONS.get(experience_level, _LEVEL_INSTRUCTIONS["studied"])
     return f"""You are the FirstDesk orchestrator — a multi-agent workplace simulator for a {cfg['title']} at {cfg['company']}.
 
 {level_block}
@@ -3581,7 +3811,7 @@ def _manager_prompt(career: str, experience_level: str) -> str:
 
 def _teammate_prompt(career: str, experience_level: str) -> str:
     cfg = CAREER_CONFIGS[career]
-    level_block = _LEVEL_INSTRUCTIONS.get(experience_level, _LEVEL_INSTRUCTIONS["experienced"])
+    level_block = _LEVEL_INSTRUCTIONS.get(experience_level, _LEVEL_INSTRUCTIONS["studied"])
     return f"""You are {cfg['teammate']['name']} ({cfg['teammate']['role']}) at {cfg['company']} — the user's PEER teammate, not their manager.
 
 {level_block}
@@ -3659,7 +3889,7 @@ def _classify_route(state: _OrcState) -> dict:
     log.debug("supervisor.route=%s", choice)
     return {"route": choice}
 
-def create_orchestrator(career, experience_level: str = "experienced"):
+def create_orchestrator(career, experience_level: str = "studied"):
     """Build the supervisor graph for this career/level. Tool subsets are
     resolved at call time so dynamically-registered tools (get_tool_list,
     get_tool_content, update_tool, appended after module init) are available."""
@@ -4590,6 +4820,9 @@ async def start_career(req: CareerReq, request: Request):
         elif req.career == "cybersecurity":
             _seed_cybersecurity_artifacts(cfg)
 
+    # Difficulty lever: harder tiers get extra judgment tests on day 1.
+    # Must run BEFORE the day-1 tag so traps are day-gated like everything else.
+    _inject_level_traps(req.career, req.experience_level)
     _tag_day1_artifacts()
     init_session(req.career, req.experience_level)
     init_reputation()
@@ -5635,9 +5868,21 @@ async def api_score():
 # ── SIMULATION CLOCK ──────────────────────────────────────────────
 # 2hrs real time = 8hrs simulated office time (09:00 → 17:00).
 # Frontend polls /api/sim_clock every ~10s for the taskbar display.
-_REAL_DAY_SEC = 2 * 60 * 60       # 2 real hours
+_REAL_DAY_SEC = 2 * 60 * 60       # 2 real hours (default / studied baseline)
 _SIM_DAY_SEC = 8 * 60 * 60        # 8 simulated hours
 _SIM_DAY_START_HOUR = 9           # 09:00 office start
+
+# Difficulty lever: everyone works the same 09:00-17:00 office day, but harder
+# tiers compress it into less real time. Same work, less room.
+_REAL_DAY_SEC_BY_LEVEL = {
+    "beginner":    150 * 60,      # 2h30 — space to read, explore, ask
+    "studied":     120 * 60,      # 2h00 — the baseline
+    "experienced":  90 * 60,      # 1h30 — no slack
+}
+
+def _real_day_sec(session: Optional[dict]) -> int:
+    return _REAL_DAY_SEC_BY_LEVEL.get(
+        (session or {}).get("experience_level"), _REAL_DAY_SEC)
 
 def _sim_clock(session: dict) -> dict:
     """Return real elapsed + remaining + simulated office time."""
@@ -5650,8 +5895,9 @@ def _sim_clock(session: dict) -> dict:
     except Exception:
         rs = datetime.utcnow()
     elapsed = max(0.0, (datetime.utcnow() - rs).total_seconds())
-    remaining = max(0.0, _REAL_DAY_SEC - elapsed)
-    sim_elapsed = min(_SIM_DAY_SEC, (elapsed / _REAL_DAY_SEC) * _SIM_DAY_SEC)
+    day_sec = _real_day_sec(session)
+    remaining = max(0.0, day_sec - elapsed)
+    sim_elapsed = min(_SIM_DAY_SEC, (elapsed / day_sec) * _SIM_DAY_SEC)
     sim_hour_float = _SIM_DAY_START_HOUR + (sim_elapsed / 3600.0)
     sim_hour = int(sim_hour_float)
     sim_min = int((sim_hour_float - sim_hour) * 60)
@@ -5766,7 +6012,7 @@ def _meeting_runtime(sess: dict, clock: dict, m: dict) -> dict:
         state = "missed"
 
     # sim seconds -> real seconds for the countdown the user sees
-    ratio = _REAL_DAY_SEC / float(_SIM_DAY_SEC)
+    ratio = _real_day_sec(sess) / float(_SIM_DAY_SEC)
     return {
         "id": m["id"], "title": m["title"], "sim_time": m["sim_time"],
         "ask": m["ask"], "prep": m.get("prep", []),
@@ -6811,6 +7057,7 @@ async def api_scenario_from_jd(req: JDIngestReq, request: Request):
     summary = engine.materializer.materialise(template, sim_id())
     engine.mark_seen(uid, template.scenario_id, resolved_career)
 
+    _inject_level_traps(resolved_career, req.experience_level)
     _tag_day1_artifacts()
     init_session(resolved_career, req.experience_level)
     init_reputation()

@@ -220,6 +220,11 @@ button{cursor:pointer}
 .lvl-pick .lvl-emoji{font-size:22px;line-height:1}
 .lvl-pick .lvl-title{font-size:16px;font-weight:600;color:#fafaf9}
 .lvl-pick .lvl-desc{font-size:13px;color:#a1a1aa;line-height:1.5;flex:1}
+.lvl-pick .lvl-badge{display:inline-block;align-self:flex-start;font-size:10.5px;font-weight:750;letter-spacing:0.04em;text-transform:uppercase;padding:3px 8px;border-radius:20px;margin:-2px 0 2px}
+.lvl-pick .lvl-badge.easy{background:rgba(34,197,94,0.16);color:#86efac}
+.lvl-pick .lvl-badge.med{background:rgba(251,191,36,0.16);color:#fcd34d}
+.lvl-pick .lvl-badge.hard{background:rgba(239,68,68,0.16);color:#fca5a5}
+.lvl-pick .lvl-desc em{color:#d4d4d8;font-style:normal;font-weight:600}
 .lvl-foot{margin-top:18px;display:flex;justify-content:space-between;align-items:center;gap:12px;color:#71717a;font-size:11px;letter-spacing:-0.005em}
 .lvl-foot button{background:transparent;border:1px solid rgba(255,255,255,0.12);color:#a1a1aa;padding:6px 12px;border-radius:8px;font-size:12px;cursor:pointer;font-family:inherit}
 .lvl-foot button:hover{color:#fafaf9;border-color:rgba(255,255,255,0.25)}
@@ -1331,23 +1336,26 @@ button{cursor:pointer}
 <div class="lvl-card">
 <div class="lvl-head">
 <h2>How familiar are you with this role?</h2>
-<p>This only changes how your AI coworkers behave — the tasks, tools and difficulty stay the same.</p>
+<p>Same job, same tools, same day. This sets how much time you get, how much your colleagues explain, and how hard mistakes bite.</p>
 </div>
 <div class="lvl-grid">
-<button type="button" class="lvl-pick" onclick="confirmLevel('experienced')">
+<button type="button" class="lvl-pick" onclick="confirmLevel('beginner')">
 <div class="lvl-emoji">🟢</div>
-<div class="lvl-title">I'm experienced</div>
-<div class="lvl-desc">I've done this job before. Treat me like a peer. Realistic pace, candid feedback, no hand-holding.</div>
+<div class="lvl-title">I'm a complete beginner</div>
+<div class="lvl-badge easy">Easy · 2h30</div>
+<div class="lvl-desc">Study guide, hints and tool explainers. Colleagues warn you <em>before</em> a mistake lands. First slip on each tool is free, and penalties are softened.</div>
 </button>
 <button type="button" class="lvl-pick" onclick="confirmLevel('studied')">
 <div class="lvl-emoji">🟡</div>
 <div class="lvl-title">I've studied this</div>
-<div class="lvl-desc">I know the concepts but haven't worked the role. Encouraging tone, slight scoring boost on good calls.</div>
+<div class="lvl-badge med">Medium · 2h00</div>
+<div class="lvl-desc">You know the theory. Brief context when a tool first appears, standard scoring, and one extra judgment call in your inbox. Nobody stops you making an ordinary mistake.</div>
 </button>
-<button type="button" class="lvl-pick" onclick="confirmLevel('beginner')">
+<button type="button" class="lvl-pick" onclick="confirmLevel('experienced')">
 <div class="lvl-emoji">🔴</div>
-<div class="lvl-title">I'm a complete beginner</div>
-<div class="lvl-desc">I'm learning. My teammate explains tools, my manager checks in often, and the first mistake on each tool is forgiven.</div>
+<div class="lvl-title">I'm experienced</div>
+<div class="lvl-badge hard">Hard · 1h30</div>
+<div class="lvl-desc">No explanations, no warnings, no second chances. Requests arrive vague, colleagues push back, mistakes cost 50% more — and there are more traps waiting.</div>
 </button>
 </div>
 <div class="lvl-foot"><button type="button" class="cc" onclick="cancelLevel()">Cancel</button></div>
@@ -1857,7 +1865,7 @@ async function _loadLevelMeta(career){
     const sr=await fetch(A+'/api/session');
     if(sr.ok){
       const sd=await sr.json();
-      const lvl=(sd&&sd.experience_level)||'experienced';
+      const lvl=(sd&&sd.experience_level)||'studied';
       _isBeginner=(lvl==='beginner');
       const cur=Number(sd&&sd.current_day)||1;
       _updateDayPill(career, cur);
