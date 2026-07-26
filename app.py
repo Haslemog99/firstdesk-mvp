@@ -5830,6 +5830,403 @@ async def api_tooltips(tool_type: str = ""):
         return {"tool_type": tool_type, "tooltips": _TOOL_TOOLTIPS.get(tool_type, {})}
     return {"tooltips_by_type": _TOOL_TOOLTIPS}
 
+# ── BEGINNER STUDY GUIDE ─────────────────────────────────────────
+# Reference primer surfaced only in beginner (easy) mode. Teaches the role
+# before/while they work it: what the job is, what each tool is for, what to
+# do first, and the mistakes that actually cost points in this simulation.
+# Content only — no DB schema. Served by GET /api/study_guide.
+_STUDY_GUIDES: dict[str, dict] = {
+    "accountant": {
+        "mission": "Keep the books true. Every number you publish should survive someone else checking it.",
+        "concepts": [
+            {"term": "Bank reconciliation",
+             "what": "Comparing what the bank says happened against what your ledger says happened.",
+             "why": "Differences are either timing (fine) or errors/fraud (not fine). Your job is to explain every single one."},
+            {"term": "General ledger (GL)",
+             "what": "The company's master record of every transaction.",
+             "why": "If the GL is wrong, every report built on it is wrong."},
+            {"term": "Discrepancy",
+             "what": "A line where bank and ledger disagree.",
+             "why": "Never 'plug' a discrepancy to make it balance. Investigate and document it."},
+            {"term": "Aged debt",
+             "what": "Invoices that are overdue, bucketed by how late they are.",
+             "why": "The older it gets, the less likely you collect. Chase early, politely, in writing."},
+        ],
+        "tools": [
+            {"name": "Sage", "what": "The accounting system — bank statement and general ledger.",
+             "your_job": "Work line by line. Flag every discrepancy with a reason, don't force a match."},
+            {"name": "Invoices", "what": "Money owed to the company.",
+             "your_job": "Chase overdue ones. Escalate disputes rather than promising discounts you can't authorise."},
+            {"name": "Outlook", "what": "Email with your manager, teammate and clients.",
+             "your_job": "Reply to the urgent ones first. Put decisions in writing."},
+        ],
+        "day_one": [
+            "Read every email before you touch a spreadsheet — one of them changes your priorities.",
+            "Open Sage and reconcile: find the discrepancies rather than assuming the ledger is right.",
+            "Document each discrepancy with what it is and what you'd do about it.",
+            "Chase the oldest overdue invoices; escalate anything disputed to your manager.",
+        ],
+        "mistakes": [
+            {"mistake": "Forcing the reconciliation to balance.",
+             "instead": "Leave it unbalanced and explain why. An honest gap beats a fake match."},
+            {"mistake": "Agreeing a discount or write-off to make a client happy.",
+             "instead": "You don't have that authority. Say you'll check and escalate."},
+            {"mistake": "Working silently for the whole day.",
+             "instead": "Tell your manager what you've found as you find it."},
+        ],
+        "glossary": {
+            "AP": "Accounts Payable — money the company owes out.",
+            "AR": "Accounts Receivable — money owed to the company.",
+            "Accrual": "Recording a cost/revenue when it's incurred, not when cash moves.",
+            "Reconcile": "Prove two records agree, and explain any that don't.",
+        },
+    },
+    "cybersecurity": {
+        "mission": "Decide, fast and defensibly, which alerts are real — and write down why.",
+        "concepts": [
+            {"term": "Triage",
+             "what": "Deciding what an alert actually is and what to do with it.",
+             "why": "A SOC drowns in alerts. Speed matters, but a wrong confident call is worse than a slow careful one."},
+            {"term": "True positive / False positive",
+             "what": "TP = real malicious activity. FP = benign thing that tripped a rule. BTP = benign-true-positive (it really happened, but it was authorised).",
+             "why": "Escalating an FP wastes the senior team. Resolving a TP lets an attacker keep going."},
+            {"term": "IOC (Indicator of Compromise)",
+             "what": "An artefact tied to an attack — IP, domain, hash, account.",
+             "why": "IOCs are how you pivot from one alert to the rest of the intrusion."},
+            {"term": "MTTR",
+             "what": "Mean time to respond. Each severity has a target: CRITICAL 15m, HIGH 30m, MEDIUM 2h, LOW 4h.",
+             "why": "You're measured on it. Take ownership early to stop the clock creeping."},
+        ],
+        "tools": [
+            {"name": "SIEM", "what": "The alert queue from across the network.",
+             "your_job": "Work highest severity first. For each: investigate (take ownership), then escalate or resolve WITH a written rationale."},
+            {"name": "Outlook", "what": "Manager, senior analyst, and client comms.",
+             "your_job": "Report what you found. Never tell a client 'no breach' before you've confirmed it."},
+        ],
+        "day_one": [
+            "Sort the queue by severity — CRITICAL and HIGH first, always.",
+            "Take ownership of an alert before you dig in, so the response clock is honest.",
+            "Write a real rationale (20+ chars): what you saw, what it means, what you did.",
+            "Most of the queue is noise. Resolving noise is correct — but read it before you resolve it.",
+        ],
+        "mistakes": [
+            {"mistake": "Escalating everything to look thorough.",
+             "instead": "Escalate what's real. Noise resolved with a reason is a correct answer."},
+            {"mistake": "Resolving a critical alert because it looked routine.",
+             "instead": "For CRITICAL/HIGH, prove it's benign before you close it."},
+            {"mistake": "Triaging with no rationale.",
+             "instead": "The rationale IS the work. It's what an auditor and your manager read later."},
+        ],
+        "glossary": {
+            "SIEM": "Security Information and Event Management — aggregates and alerts on logs.",
+            "EDR": "Endpoint Detection and Response — agent on laptops/servers.",
+            "Exfiltration": "Stealing data out of the network.",
+            "Lateral movement": "Attacker moving from one machine to another inside the network.",
+            "MITRE ATT&CK": "Standard catalogue of attacker techniques (T-numbers).",
+        },
+    },
+    "marketing": {
+        "mission": "Ship work that's on-brand, on-time, and honest about its numbers.",
+        "concepts": [
+            {"term": "Campaign",
+             "what": "A coordinated set of content with a goal and a budget.",
+             "why": "Everything you do should ladder up to a campaign goal, not just 'make a post'."},
+            {"term": "Content calendar",
+             "what": "What goes out, where, and when.",
+             "why": "Clashes and gaps are both visible failures. The calendar is the plan of record."},
+            {"term": "Brand voice",
+             "what": "The agreed tone and claims the brand can make.",
+             "why": "Off-brand or unsubstantiated claims create legal and reputational risk."},
+        ],
+        "tools": [
+            {"name": "Campaigns", "what": "Live campaigns with performance data.",
+             "your_job": "Check what's underperforming and why before you propose changes."},
+            {"name": "Content Calendar", "what": "The publishing schedule.",
+             "your_job": "Spot conflicts and gaps. Don't silently move someone else's slot."},
+        ],
+        "day_one": [
+            "Read the brief before editing anything — the ask is often narrower than it looks.",
+            "Check the calendar for clashes before scheduling new content.",
+            "If a metric looks amazing, verify how it was measured before you celebrate it.",
+        ],
+        "mistakes": [
+            {"mistake": "Publishing a claim you can't back with data.",
+             "instead": "Soften the claim or get the evidence first."},
+            {"mistake": "Reporting a vanity metric as a win.",
+             "instead": "Tie it to the campaign goal — reach isn't conversion."},
+        ],
+        "glossary": {
+            "CTR": "Click-through rate — clicks ÷ impressions.",
+            "CPA": "Cost per acquisition.",
+            "Impressions": "Times content was displayed (not unique people).",
+            "Conversion": "The goal action: signup, purchase, demo.",
+        },
+    },
+    "developer": {
+        "mission": "Move tickets honestly: small changes, clear status, no silent breakage.",
+        "concepts": [
+            {"term": "Ticket workflow",
+             "what": "Open → In Progress → In Review → Done.",
+             "why": "The board is how the team knows what's happening. A stale board is a lying board."},
+            {"term": "Priority vs severity",
+             "what": "Priority = how soon we fix it. Severity = how bad it is when it happens.",
+             "why": "A high-severity edge case can be lower priority than a medium bug hitting everyone."},
+            {"term": "Code review",
+             "what": "A teammate checks your change before it merges.",
+             "why": "Review comments aren't personal — address them or explain why not."},
+        ],
+        "tools": [
+            {"name": "Jira", "what": "The ticket board.",
+             "your_job": "Pick up by priority, move the card as you actually progress, comment what you did."},
+        ],
+        "day_one": [
+            "Read the ticket fully — including comments — before starting.",
+            "Keep In Progress to 1–2 tickets. Finishing beats starting.",
+            "If you're blocked, say so on the ticket the same day.",
+        ],
+        "mistakes": [
+            {"mistake": "Marking something Done that isn't verified.",
+             "instead": "Move to In Review and let the check happen."},
+            {"mistake": "Silently expanding scope.",
+             "instead": "Raise a new ticket rather than smuggling changes in."},
+        ],
+        "glossary": {
+            "PR": "Pull request — a proposed code change.",
+            "Regression": "Something that used to work and now doesn't.",
+            "Blocker": "Something stopping work entirely — escalate immediately.",
+        },
+    },
+    "procurement": {
+        "mission": "Nothing gets approved without security review, a signed DPA, and the right approver.",
+        "concepts": [
+            {"term": "Purchase order (PO)",
+             "what": "The formal commitment to buy.",
+             "why": "Once issued it's a contract. Checks happen BEFORE, not after."},
+            {"term": "Approval threshold",
+             "what": "<£10k team lead, <£50k Head of Procurement, >£50k CFO.",
+             "why": "Splitting an order to dodge a threshold is the classic fraud pattern. Never do it, and flag it when you see it."},
+            {"term": "DPA",
+             "what": "Data Processing Agreement — required when a vendor touches personal data.",
+             "why": "No DPA and personal data = a compliance breach with your name on the approval."},
+        ],
+        "tools": [
+            {"name": "PO Approvals", "what": "The kanban of purchase requests.",
+             "your_job": "Resolve every risk flag before moving a PO forward. Escalate, don't approve unilaterally."},
+            {"name": "Vendor Catalog", "what": "Every vendor, contract end date, cost, SOC 2 and DPA status.",
+             "your_job": "Check it before any new PO — half of requests duplicate something you already pay for."},
+        ],
+        "day_one": [
+            "Triage POs by risk flags, not by who is shouting loudest.",
+            "Cross-check every new vendor against the catalog for duplicates.",
+            "Backdating, order-splitting, and skipped security reviews are the three things to catch.",
+        ],
+        "mistakes": [
+            {"mistake": "Approving to unblock a frustrated stakeholder.",
+             "instead": "Explain what's missing and what it'd take. Urgency isn't authorisation."},
+            {"mistake": "Accepting a backdated PO.",
+             "instead": "Refuse and escalate — that's someone covering an unapproved spend."},
+        ],
+        "glossary": {
+            "SOC 2": "Independent audit of a vendor's security controls.",
+            "ARR": "Annual recurring revenue — here, annual cost of the vendor.",
+            "Sole source": "Buying without competitive comparison — needs justification.",
+        },
+    },
+    "hr": {
+        "mission": "Run programmes that people actually complete — and say no to the ones that shouldn't exist.",
+        "concepts": [
+            {"term": "Mandatory compliance training",
+             "what": "Legally required courses with audit-tracked completion.",
+             "why": "Non-negotiable. Low completion is a legal exposure, not a nudge problem."},
+            {"term": "Programme lifecycle",
+             "what": "proposed → designing → scheduled → in_session → completed (or on_hold).",
+             "why": "The column must reflect reality — a broken programme sitting in in_session helps nobody."},
+            {"term": "Manager-led completion",
+             "what": "Completion rates are driven by managers, not learners.",
+             "why": "Chase the manager. Threatening individual learners backfires and damages trust."},
+        ],
+        "tools": [
+            {"name": "Training Programs", "what": "The programme kanban.",
+             "your_job": "Keep columns honest. Put things on_hold WITH a written reason you can defend."},
+            {"name": "Learner Pipeline", "what": "Every learner, completion %, due date, and their manager.",
+             "your_job": "For compliance chases, always go via the manager."},
+        ],
+        "day_one": [
+            "Fix what's broken before designing what's new — a broken module in flight is urgent.",
+            "Compliance completion below target is your top priority, chased manager-first.",
+            "A senior leader demanding a bespoke programme is usually the trap. Check capacity first.",
+        ],
+        "mistakes": [
+            {"mistake": "Saying yes to every senior stakeholder request.",
+             "instead": "Show the capacity cost and offer an existing programme where it fits."},
+            {"mistake": "Emailing learners directly to threaten consequences.",
+             "instead": "Route via their manager with the data."},
+        ],
+        "glossary": {
+            "L&D": "Learning and Development.",
+            "LMS": "Learning Management System — hosts courses and tracks completion.",
+            "SME": "Subject Matter Expert — the person whose knowledge the course encodes.",
+            "NPS": "Net Promoter Score — satisfaction measure used post-programme.",
+        },
+    },
+    "pm": {
+        "mission": "Put things in the column the evidence supports — and never let a bad number stand because it's flattering.",
+        "concepts": [
+            {"term": "Roadmap honesty",
+             "what": "A card's column should reflect evidence, not enthusiasm.",
+             "why": "A broken experiment left in 'launched' misleads the whole company."},
+            {"term": "Double-counted conversions",
+             "what": "An instrumentation bug that counts the same conversion twice.",
+             "why": "It makes a losing test look like a win. Unwind it quietly and correct the record."},
+            {"term": "Parking with rationale",
+             "what": "Setting something aside and writing down why.",
+             "why": "Park-with-reason beats kill-silently. Future-you needs the why."},
+        ],
+        "tools": [
+            {"name": "Roadmap", "what": "The kanban of features and bets.",
+             "your_job": "Move cards to match reality. Park things that shouldn't be there, with rationale."},
+            {"name": "Feature Requests", "what": "Inbound asks from Sales, CS, and internal teams.",
+             "your_job": "Triage by evidence: how many customers, ARR impact, is it a duplicate, is it even your scope."},
+        ],
+        "day_one": [
+            "Verify the celebrated metric before you accept it — the win may be a measurement bug.",
+            "Correct the record without throwing your analyst or engineer under the bus.",
+            "Don't commit roadmap items to Sales to win a deal.",
+        ],
+        "mistakes": [
+            {"mistake": "Letting a flattering-but-wrong number stand because the CEO liked it.",
+             "instead": "Unwind it quietly, then bring the real win to the table."},
+            {"mistake": "Naming a colleague as the cause when correcting the error.",
+             "instead": "Own the correction as a team process issue."},
+        ],
+        "glossary": {
+            "A/B test": "Comparing two variants to see which performs better.",
+            "Activation": "The point a new user gets real value.",
+            "Discovery": "Research before building — interviews, data, problem framing.",
+            "Instrumentation": "The tracking code that produces your metrics.",
+        },
+    },
+    "grc": {
+        "mission": "Never overstate posture. A documented gap always beats evidence that collapses under sampling.",
+        "concepts": [
+            {"term": "Control implemented",
+             "what": "A control is only 'implemented' if there is current, in-period evidence for it.",
+             "why": "If MFA is 'implemented' but 12 admins have it off, that's an exception waiting to be found by the auditor."},
+            {"term": "Risk acceptance",
+             "what": "A risk is only 'accepted' when the accountable owner has signed a risk-acceptance record.",
+             "why": "Accepted-with-no-sign-off is just an unowned risk hiding in a green column."},
+            {"term": "BAA",
+             "what": "Business Associate Agreement — required under HIPAA before a vendor touches PHI.",
+             "why": "PHI flowing to a vendor with no BAA is a reportable problem. Escalate it, don't sit on it."},
+            {"term": "Compensating control",
+             "what": "An alternative control when the ideal one isn't feasible yet.",
+             "why": "It's the honest answer to engineering pushback — better than caving and marking it done."},
+        ],
+        "tools": [
+            {"name": "Risk Register", "what": "identified → assessing → treating → monitoring → accepted → closed.",
+             "your_job": "Make the column match the evidence. Escalate unassigned critical risks — a known owned risk is safer than a hidden one."},
+            {"name": "Control Library", "what": "The SOC 2 / HIPAA / ISO controls the auditor samples.",
+             "your_job": "Downgrade any control without in-period evidence. Honestly."},
+        ],
+        "day_one": [
+            "PHI vendor with no BAA sitting unassigned is your most urgent item — escalate to the CISO.",
+            "Controls marked implemented with no evidence must be downgraded, even though it looks worse.",
+            "A risk sitting in 'accepted' with no sign-off gets pulled back.",
+            "Answer customer security questionnaires accurately, even when Sales wants a better answer.",
+            "Not everything is a trap — some records are correctly done. Check before you 'fix' them.",
+        ],
+        "mistakes": [
+            {"mistake": "Closing a real risk to make the heat map green before a board meeting.",
+             "instead": "Leave it open with a treatment plan and a date."},
+            {"mistake": "Caving to engineering pushback and marking a control done.",
+             "instead": "Agree a compensating control and document the gap."},
+            {"mistake": "Overstating posture on a security questionnaire.",
+             "instead": "Answer accurately. Misrepresentation is the unforgivable one in this job."},
+        ],
+        "glossary": {
+            "PHI": "Protected Health Information — health data regulated under HIPAA.",
+            "SOC 2 Type II": "Audit proving controls operated effectively over a period, not just on one day.",
+            "Evidence": "Proof a control actually ran in the audit period — logs, screenshots, tickets.",
+            "Exception": "A documented deviation from a control. Honest exceptions are normal.",
+            "Fieldwork": "The period the auditor actively tests and samples your controls.",
+        },
+    },
+}
+
+# Contextual next-step hints. Shown to beginners as a sticky note.
+_LEVEL_HINTS: dict[str, list[str]] = {
+    "accountant": [
+        "Start in Outlook. One of those emails changes what you should do first.",
+        "In Sage, compare the bank statement against the ledger line by line.",
+        "Found a discrepancy? Log it with a reason — never force a match.",
+        "Chase overdue invoices, but escalate anything disputed instead of offering terms.",
+    ],
+    "cybersecurity": [
+        "Sort the SIEM queue by severity. CRITICAL and HIGH come first.",
+        "Take ownership of an alert before investigating — it starts your response clock honestly.",
+        "Every escalate/resolve needs a rationale of at least 20 characters. Say what you saw and why.",
+        "Most alerts are noise. Resolving noise is correct — but read it first.",
+    ],
+    "marketing": [
+        "Read the brief before you change any campaign.",
+        "Check the content calendar for clashes before scheduling.",
+        "If a number looks too good, check how it was measured.",
+    ],
+    "developer": [
+        "Read the whole ticket, comments included, before you start.",
+        "Keep In Progress to 1–2 tickets. Finish before you start something new.",
+        "Blocked? Say so on the ticket today, not tomorrow.",
+    ],
+    "procurement": [
+        "Open PO Approvals and work the risk flags, not the loudest requester.",
+        "Check the Vendor Catalog for a duplicate before approving any new tool.",
+        "Watch for backdating and split orders — both are approval-dodging.",
+    ],
+    "hr": [
+        "Fix the broken module before designing anything new.",
+        "Compliance completion is your priority — chase the manager, never the learner.",
+        "A VP demanding a custom programme is a capacity trap. Check what it displaces.",
+    ],
+    "pm": [
+        "Before celebrating the A/B test, check how conversions were counted.",
+        "Correct the record without blaming your analyst or your engineer.",
+        "Don't promise backlog items to Sales to close a deal.",
+    ],
+    "grc": [
+        "The PHI vendor with no BAA is your most urgent item. Escalate it to the CISO.",
+        "A control with no in-period evidence is not implemented. Downgrade it honestly.",
+        "A risk in 'accepted' with no signed sign-off gets pulled back to treating.",
+        "Answer the security questionnaire accurately, even if Sales wants a rosier answer.",
+    ],
+}
+
+@app.get("/api/study_guide")
+async def api_study_guide(career: str = ""):
+    """Beginner-mode reference primer for a career.
+
+    Falls back to the session's career when none is supplied. Returns the
+    guide plus contextual hints; the frontend only surfaces this in
+    beginner (easy) mode.
+    """
+    s = sessions_col.find_one({"session_id": session_id()},
+                              {"_id": 0, "career": 1, "experience_level": 1,
+                               "company": 1, "title": 1}) or {}
+    career = (career or s.get("career") or "").strip()
+    guide = _STUDY_GUIDES.get(career)
+    if not guide:
+        return {"career": career, "available": False,
+                "careers": sorted(_STUDY_GUIDES.keys())}
+    cfg = CAREER_CONFIGS.get(career, {})
+    return {
+        "career": career,
+        "available": True,
+        "title": s.get("title") or cfg.get("title"),
+        "company": s.get("company") or cfg.get("company"),
+        "experience_level": s.get("experience_level", "studied"),
+        "guide": guide,
+        "hints": _LEVEL_HINTS.get(career, []),
+    }
+
 @app.get("/api/reputation")
 async def api_reputation():
     r = reputation_col.find_one({"session_id": session_id()}, {"_id": 0, "events": 0}) or {}

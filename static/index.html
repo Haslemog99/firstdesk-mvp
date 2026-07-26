@@ -229,6 +229,45 @@ button{cursor:pointer}
 .bg-tt:hover>.bg-tt-pop,.bg-tt:focus>.bg-tt-pop{display:block}
 .bg-tt-pop{display:none;position:absolute;bottom:calc(100% + 8px);left:50%;transform:translateX(-50%);background:#1f1500;color:#fef3c7;padding:8px 11px;border-radius:8px;font-size:11px;font-weight:400;width:240px;line-height:1.5;z-index:200;text-align:left;border:1px solid rgba(251,191,36,0.25);box-shadow:0 6px 20px rgba(0,0,0,0.35)}
 .bg-tt-pop::after{content:'';position:absolute;top:100%;left:50%;transform:translateX(-50%);border:5px solid transparent;border-top-color:#1f1500}
+/* Beginner study guide (easy mode only) */
+.sg-overlay{display:none;position:fixed;inset:0;background:rgba(4,6,14,0.72);-webkit-backdrop-filter:blur(6px);backdrop-filter:blur(6px);z-index:9000;align-items:center;justify-content:center;padding:24px}
+.sg-overlay.on{display:flex}
+.sg-card{background:#0f1421;border:1px solid rgba(255,255,255,0.09);border-radius:16px;width:min(880px,100%);max-height:88vh;display:flex;flex-direction:column;box-shadow:0 24px 70px rgba(0,0,0,0.6);overflow:hidden}
+.sg-head{padding:20px 24px 14px;border-bottom:1px solid rgba(255,255,255,0.07);display:flex;align-items:flex-start;gap:14px}
+.sg-head h2{margin:0 0 3px;font-size:18px;color:#f1f5f9;letter-spacing:-0.01em}
+.sg-head p{margin:0;font-size:12.5px;color:#94a3b8;line-height:1.5}
+.sg-x{margin-left:auto;background:rgba(255,255,255,0.06);color:#cbd5e1;border:none;width:30px;height:30px;border-radius:8px;cursor:pointer;font-size:15px;font-family:inherit;flex:none}
+.sg-x:hover{background:rgba(255,255,255,0.12)}
+.sg-tabs{display:flex;gap:4px;padding:10px 18px 0;border-bottom:1px solid rgba(255,255,255,0.07);flex-wrap:wrap}
+.sg-tab{background:none;border:none;color:#94a3b8;padding:8px 13px;font-size:12.5px;font-weight:600;cursor:pointer;font-family:inherit;border-radius:8px 8px 0 0;border-bottom:2px solid transparent}
+.sg-tab:hover{color:#e2e8f0}
+.sg-tab.on{color:#fbbf24;border-bottom-color:#fbbf24;background:rgba(251,191,36,0.07)}
+.sg-body{padding:20px 24px 24px;overflow-y:auto;font-size:13.5px;line-height:1.65;color:#cbd5e1}
+.sg-mission{background:linear-gradient(135deg,rgba(251,191,36,0.12),rgba(251,191,36,0.04));border:1px solid rgba(251,191,36,0.22);border-left:3px solid #fbbf24;border-radius:10px;padding:13px 16px;margin-bottom:20px;color:#fde68a;font-size:13.5px}
+.sg-item{margin-bottom:16px;padding-bottom:16px;border-bottom:1px solid rgba(255,255,255,0.05)}
+.sg-item:last-child{border-bottom:none;margin-bottom:0;padding-bottom:0}
+.sg-term{color:#f1f5f9;font-weight:650;font-size:13.5px;margin-bottom:4px}
+.sg-what{color:#cbd5e1;margin-bottom:4px}
+.sg-why{color:#94a3b8;font-size:12.5px}
+.sg-why b,.sg-what b{color:#e2e8f0;font-weight:600}
+.sg-ol{margin:0;padding-left:20px}
+.sg-ol li{margin-bottom:9px}
+.sg-bad{color:#fca5a5}
+.sg-good{color:#86efac}
+.sg-gl{display:grid;grid-template-columns:auto 1fr;gap:8px 16px;align-items:baseline}
+.sg-gl dt{color:#fbbf24;font-weight:650;font-size:12.5px;white-space:nowrap}
+.sg-gl dd{margin:0;color:#94a3b8;font-size:12.5px}
+/* Sticky hint note (beginner) */
+.hint-note{display:none;position:fixed;right:18px;bottom:74px;width:270px;background:linear-gradient(160deg,#fef3c7,#fde68a);color:#1f1500;border-radius:12px;padding:13px 15px 12px;box-shadow:0 12px 34px rgba(0,0,0,0.45);z-index:8000;font-size:12.5px;line-height:1.55;border:1px solid rgba(180,130,10,0.35)}
+.hint-note.on{display:block}
+.hint-note .hn-h{display:flex;align-items:center;gap:6px;font-weight:750;font-size:11px;text-transform:uppercase;letter-spacing:0.04em;margin-bottom:6px;color:#78350f}
+.hint-note .hn-x{margin-left:auto;background:rgba(120,53,15,0.14);border:none;width:19px;height:19px;border-radius:5px;cursor:pointer;font-size:11px;color:#78350f;font-family:inherit;line-height:1}
+.hint-note .hn-x:hover{background:rgba(120,53,15,0.26)}
+.hint-note .hn-nav{display:flex;align-items:center;gap:7px;margin-top:9px;padding-top:8px;border-top:1px solid rgba(120,53,15,0.16)}
+.hint-note .hn-nav button{background:rgba(120,53,15,0.12);border:none;color:#78350f;padding:3px 9px;border-radius:6px;font-size:11px;font-weight:650;cursor:pointer;font-family:inherit}
+.hint-note .hn-nav button:hover{background:rgba(120,53,15,0.24)}
+.hint-note .hn-nav .hn-i{margin-left:auto;font-size:10.5px;color:#92400e;font-weight:600}
+@media(max-width:768px){.hint-note{right:10px;left:10px;width:auto;bottom:66px}}
 /* Day cursor pill in topbar */
 .day-pill{display:inline-flex;align-items:center;gap:8px;background:#0078d4;color:#fff;border:none;padding:5px 11px;border-radius:7px;font-size:12px;font-weight:600;cursor:pointer;font-family:inherit;letter-spacing:-0.005em}
 .day-pill:hover{background:#106ebe}
@@ -1320,11 +1359,36 @@ button{cursor:pointer}
 <!-- Toast Container -->
 <div class="toasts" id="toasts"></div>
 <!-- Taskbar -->
+<!-- BEGINNER STUDY GUIDE (easy mode only) -->
+<div class="sg-overlay" id="guideOverlay" onclick="if(event.target===this)closeGuide()">
+<div class="sg-card">
+<div class="sg-head">
+<div>
+<h2 id="sgTitle">Study Guide</h2>
+<p id="sgSub">Everything you need to do this job well.</p>
+</div>
+<button class="sg-x" onclick="closeGuide()" title="Close">✕</button>
+</div>
+<div class="sg-tabs" id="sgTabs"></div>
+<div class="sg-body" id="sgBody"></div>
+</div>
+</div>
+<!-- BEGINNER STICKY HINT -->
+<div class="hint-note" id="hintNote">
+<div class="hn-h">💡 Hint<button class="hn-x" onclick="dismissHint()" title="Hide hints">✕</button></div>
+<div id="hnText">—</div>
+<div class="hn-nav">
+<button onclick="hintPrev()">‹ Prev</button>
+<button onclick="hintNext()">Next ›</button>
+<span class="hn-i" id="hnIdx">1/1</span>
+</div>
+</div>
 <div class="taskbar" id="taskbar">
 <button class="tb" onclick="tw('outlook')" id="tbOutlook">Outlook <span class="n" id="tmc">0</span></button>
 <button class="tb" onclick="tw('tool')" id="tbTool">Tool</button>
 <button class="tb" onclick="tw('tasks')" id="tbTasks">Tasks</button>
 <button class="tb" onclick="tw('chat')" id="tbChat">Slack</button>
+<button class="tb" onclick="openGuide()" id="tbGuide" style="display:none;background:rgba(251,191,36,0.16);color:#fcd34d">📖 Guide</button>
 <div class="tbr"><span class="tbs" id="simClock" title="Simulation time · real time remaining" style="display:none;background:linear-gradient(180deg,#6366f1,#4f46e5)">09:00 · 2h 00m</span><button class="day-pill" id="dayPill" onclick="advanceDay()" style="display:none">+1 Day · Day 1/5</button><span class="tbs" id="tbrep" title="Workplace conduct standing">✓ Good Standing</span><span class="tbs" id="tbsc">0 pts</span><button class="tb" onclick="bh()" style="background:rgba(255,255,255,0.05);color:#cbd5e1">← Back to Roles</button><button class="tb" onclick="ed()" style="background:rgba(220,38,38,0.2);color:#fca5a5">End Day</button></div>
 </div>
 <script>
@@ -1346,8 +1410,8 @@ window.fetch=function(url,opts){
     return r;
   });
 };
-function showAuth(){document.body.classList.remove('desk-mode');document.getElementById('authScreen').classList.add('on');document.getElementById('careerSelect').classList.remove('on');document.getElementById('desktop').classList.remove('active');document.getElementById('taskbar').classList.remove('active');document.querySelector('.brand').style.display='flex';const gb=document.getElementById('guestBanner');if(gb)gb.classList.remove('on');try{_stopSimClockPoll()}catch(e){}window.scrollTo(0,0)}
-function showLanding(){document.body.classList.remove('desk-mode');document.getElementById('authScreen').classList.remove('on');document.getElementById('careerSelect').classList.add('on');document.getElementById('desktop').classList.remove('active');document.getElementById('taskbar').classList.remove('active');document.querySelector('.brand').style.display='flex';try{_stopSimClockPoll()}catch(e){}window.scrollTo(0,0);backToChooser();loadDashboard();try{_syncPaidUI()}catch(e){}}
+function showAuth(){document.body.classList.remove('desk-mode');document.getElementById('authScreen').classList.add('on');document.getElementById('careerSelect').classList.remove('on');document.getElementById('desktop').classList.remove('active');document.getElementById('taskbar').classList.remove('active');document.querySelector('.brand').style.display='flex';const gb=document.getElementById('guestBanner');if(gb)gb.classList.remove('on');try{_stopSimClockPoll()}catch(e){}try{_resetBeginnerAids()}catch(e){}window.scrollTo(0,0)}
+function showLanding(){document.body.classList.remove('desk-mode');document.getElementById('authScreen').classList.remove('on');document.getElementById('careerSelect').classList.add('on');document.getElementById('desktop').classList.remove('active');document.getElementById('taskbar').classList.remove('active');document.querySelector('.brand').style.display='flex';try{_stopSimClockPoll()}catch(e){}try{_resetBeginnerAids()}catch(e){}window.scrollTo(0,0);backToChooser();loadDashboard();try{_syncPaidUI()}catch(e){}}
 const _PAID_PLANS=['pro','premium','team','enterprise'];
 function _isPaidUser(){return !!(currentUser&&currentUser.plan&&_PAID_PLANS.indexOf(currentUser.plan)>=0)}
 function openPaywall(){const m=document.getElementById('paywall');if(m)m.classList.add('on')}
@@ -1741,7 +1805,96 @@ async function _loadLevelMeta(career){
     for(const t of types){
       try{const r=await fetch(A+'/api/tooltips?tool_type='+encodeURIComponent(t));const d=await r.json();if(d&&d.tooltips){_tipsByType[t]=d.tooltips}}catch(e){}
     }
+    await _loadStudyGuide(career);
+  }else{
+    const gb=document.getElementById('tbGuide');if(gb)gb.style.display='none';
+    const hn=document.getElementById('hintNote');if(hn)hn.classList.remove('on');
   }
+}
+
+// ── BEGINNER STUDY GUIDE + HINTS ─────────────────────────────
+// Both are beginner(easy)-mode only. The guide is a reference primer for the
+// role; the hint note is a rotating next-step nudge pinned above the taskbar.
+let _guide=null,_hints=[],_hintIdx=0,_hintOff=false,_sgTab='overview';
+async function _loadStudyGuide(career){
+  try{
+    const r=await fetch(A+'/api/study_guide?career='+encodeURIComponent(career||''));
+    if(!r.ok)return;
+    const d=await r.json();
+    if(!d||!d.available)return;
+    _guide=d;_hints=d.hints||[];_hintIdx=0;
+    const gb=document.getElementById('tbGuide');if(gb)gb.style.display='inline-flex';
+    if(_hints.length&&!_hintOff)_renderHint();
+  }catch(e){console.warn('study guide load failed',e)}
+}
+function openGuide(){
+  if(!_guide)return;
+  const t=document.getElementById('sgTitle'),s=document.getElementById('sgSub');
+  if(t)t.textContent=(_guide.title||'Study Guide');
+  if(s)s.textContent=(_guide.company||'')+' · read this before you start, and whenever you get stuck.';
+  _sgTab='overview';_renderGuide();
+  document.getElementById('guideOverlay').classList.add('on');
+}
+function closeGuide(){document.getElementById('guideOverlay').classList.remove('on')}
+function sgTab(name){_sgTab=name;_renderGuide()}
+function _renderGuide(){
+  if(!_guide||!_guide.guide)return;
+  const g=_guide.guide;
+  const tabs=[['overview','Overview'],['concepts','Key concepts'],['tools','Your tools'],['dayone','Day 1'],['mistakes','Common mistakes'],['glossary','Glossary']];
+  document.getElementById('sgTabs').innerHTML=tabs.map(function(t){
+    return '<button class="sg-tab'+(_sgTab===t[0]?' on':'')+'" onclick="sgTab(\''+t[0]+'\')">'+esc(t[1])+'</button>';
+  }).join('');
+  let h='';
+  if(_sgTab==='overview'){
+    h+='<div class="sg-mission"><b>Your job:</b> '+esc(g.mission||'')+'</div>';
+    h+='<div class="sg-item"><div class="sg-term">How to use this guide</div><div class="sg-what">Skim <b>Day 1</b> first — that is your running order. Dip into <b>Key concepts</b> when a term is unfamiliar, and read <b>Common mistakes</b> before you make a decision you cannot undo.</div></div>';
+    if((g.day_one||[]).length){
+      h+='<div class="sg-item"><div class="sg-term">Start here</div><ol class="sg-ol">'+g.day_one.slice(0,3).map(function(x){return '<li>'+esc(x)+'</li>'}).join('')+'</ol></div>';
+    }
+  }else if(_sgTab==='concepts'){
+    h+=(g.concepts||[]).map(function(c){
+      return '<div class="sg-item"><div class="sg-term">'+esc(c.term)+'</div>'
+        +'<div class="sg-what">'+esc(c.what)+'</div>'
+        +'<div class="sg-why"><b>Why it matters:</b> '+esc(c.why)+'</div></div>';
+    }).join('')||'<div class="sg-why">No concepts listed.</div>';
+  }else if(_sgTab==='tools'){
+    h+=(g.tools||[]).map(function(t){
+      return '<div class="sg-item"><div class="sg-term">'+esc(t.name)+'</div>'
+        +'<div class="sg-what">'+esc(t.what)+'</div>'
+        +'<div class="sg-why"><b>Your job here:</b> '+esc(t.your_job)+'</div></div>';
+    }).join('')||'<div class="sg-why">No tools listed.</div>';
+  }else if(_sgTab==='dayone'){
+    h+='<div class="sg-mission">Work these in order. Finishing one properly beats starting all four.</div>';
+    h+='<ol class="sg-ol">'+(g.day_one||[]).map(function(x){return '<li>'+esc(x)+'</li>'}).join('')+'</ol>';
+  }else if(_sgTab==='mistakes'){
+    h+=(g.mistakes||[]).map(function(m){
+      return '<div class="sg-item"><div class="sg-term sg-bad">✗ '+esc(m.mistake)+'</div>'
+        +'<div class="sg-good">✓ '+esc(m.instead)+'</div></div>';
+    }).join('')||'<div class="sg-why">No mistakes listed.</div>';
+  }else if(_sgTab==='glossary'){
+    const gl=g.glossary||{};const ks=Object.keys(gl);
+    h+=ks.length?('<dl class="sg-gl">'+ks.map(function(k){return '<dt>'+esc(k)+'</dt><dd>'+esc(gl[k])+'</dd>'}).join('')+'</dl>'):'<div class="sg-why">No glossary.</div>';
+  }
+  document.getElementById('sgBody').innerHTML=h;
+}
+function _renderHint(){
+  if(_hintOff||!_hints.length)return;
+  const n=document.getElementById('hintNote');if(!n)return;
+  if(_hintIdx<0)_hintIdx=0;
+  if(_hintIdx>=_hints.length)_hintIdx=_hints.length-1;
+  document.getElementById('hnText').textContent=_hints[_hintIdx];
+  document.getElementById('hnIdx').textContent=(_hintIdx+1)+'/'+_hints.length;
+  n.classList.add('on');
+}
+function hintNext(){if(_hintIdx<_hints.length-1){_hintIdx++;_renderHint()}}
+function hintPrev(){if(_hintIdx>0){_hintIdx--;_renderHint()}}
+function dismissHint(){_hintOff=true;const n=document.getElementById('hintNote');if(n)n.classList.remove('on')}
+// Clear beginner scaffolding when leaving the desktop (role switch / logout).
+function _resetBeginnerAids(){
+  _guide=null;_hints=[];_hintIdx=0;_hintOff=false;
+  const n=document.getElementById('hintNote');if(n)n.classList.remove('on');
+  const o=document.getElementById('guideOverlay');if(o)o.classList.remove('on');
+  const b=document.getElementById('tbGuide');if(b)b.style.display='none';
 }
 function _updateDayPill(career, day){
   if(day)window._curDay=Number(day)||1;
