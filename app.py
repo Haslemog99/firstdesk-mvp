@@ -5682,11 +5682,344 @@ async def api_sim_clock():
             except Exception as ex:
                 log.warning("auto_end.eod_insert_failed kind=%s", type(ex).__name__)
         clock["auto_ended"] = True
+    # Meetings advance on the same heartbeat, server-side, so closing the tab
+    # can't dodge a no-show.
+    try:
+        clock["meetings"] = _sync_meetings(s, clock)
+    except Exception as ex:
+        log.warning("sim_clock.meeting_sync_failed kind=%s", type(ex).__name__)
+        clock["meetings"] = []
     return clock
 
 @app.get("/api/session")
 async def api_session():
     return sessions_col.find_one({"session_id": session_id()}, {"_id": 0}) or {}
+
+# ── TIMED MEETINGS ────────────────────────────────────────────────
+# A meeting is a scene that opens on the SIM clock (never wall clock) and
+# closes whether or not the user turns up. The user gets one main turn; the
+# NPC reaction is grounded in what the session says they ACTUALLY did, so a
+# summary that claims work they didn't do gets caught in the room.
+#
+# sim offset: 1 sim hour = 15 real minutes (8 sim hours over 2 real hours).
+_MEETINGS: dict[str, dict[int, list[dict]]] = {
+    "cybersecurity": {
+        1: [{
+            "id": "cyber-d1-standup",
+            "title": "Morning standup",
+            "sim_time": "11:00",
+            "task_id": "t4",          # the authored "Prep for 11am standup" task
+            "points": 10,
+            "host_key": "manager",
+            "ask": "Your triage summary: what you found, what you escalated, what you're still chasing.",
+            "prep": [
+                "How many alerts you worked, and how many were real.",
+                "Which ones you escalated — by ID — and why.",
+                "Anything still open that you need help with.",
+            ],
+            "opening": [
+                {"who": "manager",  "text": "Right, quick one. Two minutes each, then back to it. Priya, go."},
+                {"who": "teammate", "text": "Overnight I closed the Ligolo beacon on FIN-04. Confirmed C2, host's isolated. Still chasing the lateral attempts coming off it."},
+                {"who": "manager",  "text": "Good. You've had the morning on the overnight queue — what have you got?"},
+            ],
+        }],
+    },
+}
+
+# Warning lead-time and how long the door stays open, per difficulty tier.
+_MEETING_WINDOWS = {
+    "beginner":    {"warn_sim_min": 30, "window_sim_min": 45},
+    "studied":     {"warn_sim_min": 15, "window_sim_min": 30},
+    "experienced": {"warn_sim_min": 5,  "window_sim_min": 15},
+}
+
+def _sim_offset_sec(hhmm: str) -> int:
+    """'11:00' -> seconds after the 09:00 sim start."""
+    try:
+        h, m = str(hhmm).split(":")
+        return max(0, (int(h) - _SIM_DAY_START_HOUR) * 3600 + int(m) * 60)
+    except Exception:
+        return 0
+
+def _meetings_for(career: str, day: int) -> list[dict]:
+    return list((_MEETINGS.get(career or "", {}) or {}).get(int(day or 1), []))
+
+def _meeting_runtime(sess: dict, clock: dict, m: dict) -> dict:
+    """Derive live state for one meeting from the sim clock + stored record."""
+    lvl = sess.get("experience_level", "studied")
+    win = _MEETING_WINDOWS.get(lvl, _MEETING_WINDOWS["studied"])
+    opens = _sim_offset_sec(m["sim_time"])
+    warn = opens - win["warn_sim_min"] * 60
+    closes = opens + win["window_sim_min"] * 60
+    now = int(clock.get("sim_elapsed_sec") or 0)
+    rec = ((sess.get("meetings") or {}).get(m["id"])) or {}
+
+    if rec.get("state") in ("attended", "missed"):
+        state = rec["state"]
+    elif now < warn:
+        state = "pending"
+    elif now < opens:
+        state = "notified"
+    elif now < closes:
+        state = "open"
+    else:
+        state = "missed"
+
+    # sim seconds -> real seconds for the countdown the user sees
+    ratio = _REAL_DAY_SEC / float(_SIM_DAY_SEC)
+    return {
+        "id": m["id"], "title": m["title"], "sim_time": m["sim_time"],
+        "ask": m["ask"], "prep": m.get("prep", []),
+        "state": state,
+        "opens_in_real_sec": max(0, int((opens - now) * ratio)),
+        "closes_in_real_sec": max(0, int((closes - now) * ratio)),
+        "late": bool(state == "open" and rec.get("joined_at") is None and now > opens + 300),
+        "submitted": bool(rec.get("submitted_at")),
+        "score": rec.get("score"),
+    }
+
+def _sync_meetings(sess: dict, clock: dict) -> list[dict]:
+    """Advance meeting state machines. Writes side effects for missed meetings."""
+    career = sess.get("career") or get_career() or ""
+    day = int(sess.get("current_day") or 1)
+    out: list[dict] = []
+    for m in _meetings_for(career, day):
+        rt = _meeting_runtime(sess, clock, m)
+        stored = ((sess.get("meetings") or {}).get(m["id"])) or {}
+        if rt["state"] != stored.get("state"):
+            sessions_col.update_one(
+                {"session_id": session_id()},
+                {"$set": {f"meetings.{m['id']}.state": rt["state"],
+                          f"meetings.{m['id']}.updated_at": datetime.utcnow().isoformat()}},
+            )
+            if rt["state"] == "missed" and not stored.get("submitted_at"):
+                _meeting_missed(sess, m)
+        out.append(rt)
+    return out
+
+def _meeting_missed(sess: dict, m: dict) -> None:
+    """No-show: manager notes it in writing, and the prep task's points are lost."""
+    cfg = CAREER_CONFIGS.get(sess.get("career") or "cybersecurity", CAREER_CONFIGS["cybersecurity"])
+    mgr = cfg["manager"]
+    try:
+        emails_col.insert_one({
+            "id": f"missed-{m['id']}", "simulation_id": sim_id(),
+            "from_name": mgr["name"], "from_role": mgr["role"], "from_email": mgr["email"],
+            "to": "you", "subject": f"You missed {m['title'].lower()}",
+            "body": (f"You weren't on the {m['sim_time']} {m['title'].lower()}.\n\n"
+                     "I needed your update in the room — that's how the rest of the team knows "
+                     "what's covered and what isn't. If you're heads-down in something, say so "
+                     "beforehand and I'll take it async.\n\n"
+                     "Send me your summary by reply now, please.\n\n" + mgr["name"]),
+            "time": datetime.utcnow().strftime("%H:%M"), "read": False, "replied": False,
+            "priority": "high", "category": "manager_review", "requires_action": True,
+            "day": int(sess.get("current_day") or 1), "injected": True,
+        })
+    except Exception as ex:
+        log.warning("meeting.missed_email_failed kind=%s", type(ex).__name__)
+    pts = _apply_level_weight(-int(m.get("points", 10)), "meeting")
+    sessions_col.update_one({"session_id": session_id()},
+                            {"$inc": {"score_adj": pts},
+                             "$push": {"performance_notes": f"Missed {m['title']} ({m['sim_time']})."}})
+
+def _meeting_grounding(career: str) -> dict:
+    """What the user ACTUALLY did — the reaction prompt is grounded in this."""
+    g: dict = {}
+    if career == "cybersecurity":
+        alerts = list(siem_col.find(
+            {"simulation_id": sim_id()},
+            {"_id": 0, "id": 1, "severity": 1, "status": 1, "is_real_threat": 1,
+             "correct_action": 1, "title": 1, "triage_status": 1}))
+        triaged = [a for a in alerts if a.get("triage_status") == "reviewed"]
+        # /triage stores the action verb ("escalate"/"resolve"), but other paths
+        # may write past tense. Match the stem so grounding never under-reports
+        # work the user genuinely did.
+        esc = [a for a in triaged if str(a.get("status") or "").startswith("escalat")]
+        res = [a for a in triaged if str(a.get("status") or "").startswith("resolv")]
+        # "investigate" = took ownership, deliberately still open. That is real
+        # work and must not read as idleness.
+        owned = [a for a in alerts if a.get("triage_status") == "investigating"]
+        real_open = [a for a in alerts if a.get("is_real_threat")
+                     and a.get("triage_status") not in ("reviewed", "investigating")]
+        def _stem(v): return str(v or "").rstrip("d").rstrip("e")
+        wrong = [a for a in triaged
+                 if a.get("correct_action") and _stem(a.get("status")) != _stem(a.get("correct_action"))]
+        g = {
+            "total_alerts": len(alerts),
+            "triaged_count": len(triaged),
+            "owned_still_open_ids": [a["id"] for a in owned][:12],
+            "still_open_count": len(alerts) - len(triaged) - len(owned),
+            "escalated_ids": [a["id"] for a in esc][:12],
+            "resolved_count": len(res),
+            "real_threats_untouched": [{"id": a["id"], "title": a.get("title"), "sev": a.get("severity")}
+                                       for a in real_open][:6],
+            "mis_triaged": [{"id": a["id"], "title": a.get("title"),
+                             "did": a.get("status"), "should_have": a.get("correct_action")}
+                            for a in wrong][:6],
+        }
+    return g
+
+_MEETING_REACTION_SYS = """You are running a short workplace stand-up scene.
+
+You will be given: the meeting context, WHO is in the room, GROUND TRUTH about
+what the user actually did this morning, and the summary the user just gave.
+
+Write how the room reacts. Rules:
+- 2 to 4 short turns, spoken aloud in a meeting. No narration, no stage directions.
+- Compare the user's summary against GROUND TRUTH. If they overstate, understate,
+  or omit something significant, someone in the room notices it NATURALLY and
+  specifically (cite the number or the alert ID). Colleagues are direct, not cruel.
+- If the summary is accurate and specific, acknowledge it briefly and move on.
+  Do not manufacture a problem that the ground truth does not support.
+- The host closes with a concrete next step for the user.
+- Each turn is 1-2 sentences. This is a stand-up, not a review.
+
+Return ONLY a JSON object, no markdown fence:
+{"turns":[{"who":"manager|teammate","text":"..."}],
+ "accuracy":"accurate|vague|incomplete|overstated",
+ "quality":0.0-1.0,
+ "note":"one line for the user's performance log"}
+
+Choose accuracy STRICTLY:
+- "overstated" ONLY when they claim work, results, or coverage that the ground
+  truth contradicts — i.e. they are taking credit for something they did not do.
+  This is the serious one. Reserve it for that.
+- "incomplete" when everything they said is TRUE but they left out something
+  significant, or mischaracterised what remains outstanding.
+- "vague" when it is true but too unspecific to be useful (no IDs, no numbers).
+- "accurate" when it matches the ground truth and is specific.
+A truthful update with an imperfection is "incomplete" or "vague" — NOT
+"overstated". Honest-but-imperfect must never be graded as fabrication.
+
+quality scores it as a professional update: specific, prioritised, flags
+escalations and blockers. overstated MUST score below 0.35."""
+
+def _meeting_react(sess: dict, m: dict, summary: str, grounding: dict) -> dict:
+    cfg = CAREER_CONFIGS.get(sess.get("career") or "cybersecurity", CAREER_CONFIGS["cybersecurity"])
+    who = (f"manager = {cfg['manager']['name']} ({cfg['manager']['role']})\n"
+           f"teammate = {cfg['teammate']['name']} ({cfg['teammate']['role']})")
+    human = (f"MEETING: {m['title']} at {m['sim_time']}\n"
+             f"THE ASK: {m['ask']}\n\nWHO IS IN THE ROOM:\n{who}\n\n"
+             f"GROUND TRUTH (what the user actually did):\n"
+             f"{json.dumps(grounding, indent=2)}\n\n"
+             f"THE USER'S SUMMARY:\n\"\"\"{summary[:2000]}\"\"\"\n\nReact now.")
+    try:
+        resp = llm.invoke([("system", _MEETING_REACTION_SYS), ("human", human)])
+        raw = (resp.content or "").strip()
+        if raw.startswith("```"):
+            raw = raw.strip("`")
+            raw = raw[raw.find("{"):] if "{" in raw else raw
+        i, j = raw.find("{"), raw.rfind("}")
+        data = json.loads(raw[i:j + 1]) if i != -1 and j != -1 else {}
+    except Exception as ex:
+        log.warning("meeting.react_failed kind=%s", type(ex).__name__)
+        data = {}
+    turns = [t for t in (data.get("turns") or []) if t.get("text")][:4]
+    if not turns:
+        turns = [{"who": "manager", "text": "Understood. Keep it moving — I'll pick this up with you after."}]
+    return {
+        "turns": turns,
+        "accuracy": data.get("accuracy") or "vague",
+        "quality": max(0.0, min(1.0, float(data.get("quality") or 0.4))),
+        "note": data.get("note") or "Gave a stand-up update.",
+    }
+
+class MeetingSubmitReq(BaseModel):
+    summary: SafeStr = Field(..., min_length=1, max_length=4000)
+
+@app.get("/api/meetings")
+async def api_meetings():
+    """Live meeting state for the current career/day. Drives the taskbar pill."""
+    s = sessions_col.find_one({"session_id": session_id()}) or {}
+    clock = _sim_clock(s)
+    return {"sim_time": clock["sim_time"], "meetings": _sync_meetings(s, clock)}
+
+@app.get("/api/meetings/{meeting_id}")
+async def api_meeting_scene(meeting_id: str):
+    """Scene payload: the scripted opening beats plus anything already said.
+    Fetching this while the meeting is open counts as joining the room."""
+    s = sessions_col.find_one({"session_id": session_id()}) or {}
+    clock = _sim_clock(s)
+    career = s.get("career") or get_career() or ""
+    day = int(s.get("current_day") or 1)
+    m = next((x for x in _meetings_for(career, day) if x["id"] == meeting_id), None)
+    if not m:
+        raise HTTPException(status_code=404, detail="Meeting not found")
+    rt = _meeting_runtime(s, clock, m)
+    rec = ((s.get("meetings") or {}).get(meeting_id)) or {}
+    if rt["state"] == "open" and not rec.get("joined_at"):
+        sessions_col.update_one(
+            {"session_id": session_id()},
+            {"$set": {f"meetings.{meeting_id}.joined_at": datetime.utcnow().isoformat()}})
+    cfg = CAREER_CONFIGS.get(career or "cybersecurity", CAREER_CONFIGS["cybersecurity"])
+    names = {"manager": cfg["manager"], "teammate": cfg["teammate"], "you": {"name": "You", "role": ""}}
+    opening = [{"who": b["who"], "name": names[b["who"]]["name"],
+                "role": names[b["who"]]["role"], "text": b["text"]}
+               for b in m.get("opening", [])]
+    return {"meeting": rt, "opening": opening,
+            "transcript": rec.get("transcript") or [],
+            "people": {k: {"name": v["name"], "role": v.get("role", "")} for k, v in names.items()}}
+
+@app.post("/api/meetings/{meeting_id}/submit")
+async def api_meeting_submit(meeting_id: str, body: MeetingSubmitReq):
+    """Your turn in the room. Scored against what you actually did."""
+    s = sessions_col.find_one({"session_id": session_id()}) or {}
+    clock = _sim_clock(s)
+    career = s.get("career") or get_career() or ""
+    day = int(s.get("current_day") or 1)
+    m = next((x for x in _meetings_for(career, day) if x["id"] == meeting_id), None)
+    if not m:
+        raise HTTPException(status_code=404, detail="Meeting not found")
+    rec = ((s.get("meetings") or {}).get(meeting_id)) or {}
+    if rec.get("submitted_at"):
+        raise HTTPException(status_code=400, detail="You've already given your update.")
+    rt = _meeting_runtime(s, clock, m)
+    if rt["state"] != "open":
+        raise HTTPException(status_code=400,
+                            detail="That meeting isn't open." if rt["state"] in ("pending", "notified")
+                            else "That meeting is over.")
+
+    grounding = _meeting_grounding(career)
+    reaction = _meeting_react(s, m, body.summary, grounding)
+
+    base = int(m.get("points", 10))
+    quality = reaction["quality"]
+    if reaction["accuracy"] == "overstated":
+        # Claiming work you didn't do is the only path to a negative score —
+        # worse than a thin update, and worse than not showing up.
+        raw = -int(round(base * 0.8))
+    else:
+        raw = int(round(base * quality * (0.6 if rt["late"] else 1.0)))
+        # Turning up and telling the truth always beats silence, even if the
+        # update was scrappy.
+        raw = max(raw, 1)
+    pts = _apply_level_weight(raw, "meeting")
+
+    cfg = CAREER_CONFIGS.get(career or "cybersecurity", CAREER_CONFIGS["cybersecurity"])
+    names = {"manager": cfg["manager"]["name"], "teammate": cfg["teammate"]["name"]}
+    transcript = (rec.get("transcript") or []) + \
+        [{"who": "you", "name": "You", "text": body.summary}] + \
+        [{"who": t.get("who", "manager"), "name": names.get(t.get("who", "manager"), "Colleague"),
+          "text": t["text"]} for t in reaction["turns"]]
+
+    sessions_col.update_one(
+        {"session_id": session_id()},
+        {"$set": {f"meetings.{meeting_id}.state": "attended",
+                  f"meetings.{meeting_id}.submitted_at": datetime.utcnow().isoformat(),
+                  f"meetings.{meeting_id}.summary": body.summary,
+                  f"meetings.{meeting_id}.accuracy": reaction["accuracy"],
+                  f"meetings.{meeting_id}.quality": quality,
+                  f"meetings.{meeting_id}.score": pts,
+                  f"meetings.{meeting_id}.transcript": transcript},
+         "$inc": {"score_adj": pts},
+         "$push": {"performance_notes": f"{m['title']}: {reaction['note']}"}})
+
+    if m.get("task_id"):
+        tasks_col.update_one({"id": m["task_id"], "simulation_id": sim_id()},
+                             {"$set": {"status": "completed"}})
+    return {"ok": True, "turns": transcript[-len(reaction["turns"]):],
+            "accuracy": reaction["accuracy"], "quality": quality,
+            "points": pts, "late": rt["late"]}
 
 # ── BEGINNER-MODE TOOLTIPS ────────────────────────────────────────
 # Plain-English explanations of column headers, returned to the frontend

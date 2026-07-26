@@ -268,6 +268,46 @@ button{cursor:pointer}
 .hint-note .hn-nav button:hover{background:rgba(120,53,15,0.24)}
 .hint-note .hn-nav .hn-i{margin-left:auto;font-size:10.5px;color:#92400e;font-weight:600}
 @media(max-width:768px){.hint-note{right:10px;left:10px;width:auto;bottom:66px}}
+/* Timed meeting pill + scene */
+.mtg-pill{display:none;align-items:center;gap:6px;background:linear-gradient(180deg,#475569,#334155);color:#e2e8f0;border:none;padding:5px 11px;border-radius:7px;font-size:12px;font-weight:600;cursor:default;font-family:inherit;letter-spacing:-0.005em}
+.mtg-pill.on{display:inline-flex}
+.mtg-pill.soon{background:linear-gradient(180deg,#f59e0b,#d97706);color:#1f1500;cursor:pointer}
+.mtg-pill.live{background:linear-gradient(180deg,#ef4444,#b91c1c);color:#fff;cursor:pointer;animation:simPulse 1.4s ease-in-out infinite}
+.mtg-pill.done{background:linear-gradient(180deg,#166534,#14532d);color:#bbf7d0}
+.mtg-pill.gone{background:linear-gradient(180deg,#7f1d1d,#601414);color:#fecaca}
+.mtg-overlay{display:none;position:fixed;inset:0;background:rgba(4,6,14,0.8);-webkit-backdrop-filter:blur(7px);backdrop-filter:blur(7px);z-index:9500;align-items:center;justify-content:center;padding:24px}
+.mtg-overlay.on{display:flex}
+.mtg-card{background:#0f1421;border:1px solid rgba(255,255,255,0.10);border-radius:16px;width:min(680px,100%);max-height:88vh;display:flex;flex-direction:column;box-shadow:0 26px 74px rgba(0,0,0,0.65);overflow:hidden}
+.mtg-head{padding:16px 20px;border-bottom:1px solid rgba(255,255,255,0.07);display:flex;align-items:center;gap:12px;background:rgba(239,68,68,0.07)}
+.mtg-head h3{margin:0;font-size:15px;color:#f1f5f9;letter-spacing:-0.01em}
+.mtg-head .mtg-sub{font-size:11.5px;color:#94a3b8;margin-top:2px}
+.mtg-live{display:inline-flex;align-items:center;gap:5px;font-size:10.5px;font-weight:750;text-transform:uppercase;letter-spacing:0.05em;color:#fca5a5;background:rgba(239,68,68,0.16);padding:3px 8px;border-radius:20px}
+.mtg-live::before{content:'';width:6px;height:6px;border-radius:50%;background:#ef4444;animation:simPulse 1.2s ease-in-out infinite}
+.mtg-timer{margin-left:auto;font-size:12.5px;font-weight:700;color:#fca5a5;font-variant-numeric:tabular-nums}
+.mtg-body{padding:16px 20px;overflow-y:auto;flex:1;min-height:180px}
+.mtg-turn{display:flex;gap:10px;margin-bottom:14px;animation:mtgIn 0.25s ease-out}
+@keyframes mtgIn{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+.mtg-av{width:30px;height:30px;border-radius:50%;background:linear-gradient(135deg,#475569,#334155);color:#e2e8f0;display:flex;align-items:center;justify-content:center;font-size:11.5px;font-weight:700;flex:none}
+.mtg-turn.you .mtg-av{background:linear-gradient(135deg,#4f46e5,#4338ca);color:#fff}
+.mtg-who{font-size:12px;font-weight:650;color:#e2e8f0;margin-bottom:2px}
+.mtg-who span{font-weight:400;color:#64748b;font-size:11px}
+.mtg-text{font-size:13px;color:#cbd5e1;line-height:1.55}
+.mtg-typing{font-size:12px;color:#64748b;font-style:italic;padding:4px 0 10px 40px}
+.mtg-foot{padding:14px 20px 16px;border-top:1px solid rgba(255,255,255,0.07);background:rgba(255,255,255,0.02)}
+.mtg-ask{font-size:11.5px;color:#94a3b8;margin-bottom:8px}
+.mtg-ask b{color:#cbd5e1}
+.mtg-prep{margin:6px 0 10px;padding:9px 12px;background:rgba(251,191,36,0.08);border:1px solid rgba(251,191,36,0.2);border-radius:8px;font-size:11.5px;color:#fde68a}
+.mtg-prep ul{margin:5px 0 0;padding-left:16px}
+.mtg-prep li{margin-bottom:2px}
+.mtg-ta{width:100%;background:#0a0e17;border:1px solid rgba(255,255,255,0.12);border-radius:9px;padding:10px 12px;color:#e2e8f0;font-size:13px;font-family:inherit;resize:vertical;min-height:78px;line-height:1.5}
+.mtg-ta:focus{outline:none;border-color:#6366f1}
+.mtg-actions{display:flex;gap:8px;margin-top:9px;align-items:center}
+.mtg-send{background:linear-gradient(180deg,#4f46e5,#4338ca);color:#fff;border:none;padding:8px 16px;border-radius:8px;font-size:13px;font-weight:650;cursor:pointer;font-family:inherit}
+.mtg-send:disabled{opacity:0.5;cursor:not-allowed}
+.mtg-skip{background:rgba(255,255,255,0.06);color:#94a3b8;border:none;padding:8px 13px;border-radius:8px;font-size:12.5px;cursor:pointer;font-family:inherit}
+.mtg-skip:hover{background:rgba(255,255,255,0.11);color:#cbd5e1}
+.mtg-verdict{margin-left:auto;font-size:11.5px;font-weight:650}
+.mtg-verdict.good{color:#86efac}.mtg-verdict.bad{color:#fca5a5}.mtg-verdict.mid{color:#fcd34d}
 /* Day cursor pill in topbar */
 .day-pill{display:inline-flex;align-items:center;gap:8px;background:#0078d4;color:#fff;border:none;padding:5px 11px;border-radius:7px;font-size:12px;font-weight:600;cursor:pointer;font-family:inherit;letter-spacing:-0.005em}
 .day-pill:hover{background:#106ebe}
@@ -1373,6 +1413,30 @@ button{cursor:pointer}
 <div class="sg-body" id="sgBody"></div>
 </div>
 </div>
+<!-- TIMED MEETING SCENE -->
+<div class="mtg-overlay" id="mtgOverlay">
+<div class="mtg-card">
+<div class="mtg-head">
+<div>
+<h3 id="mtgTitle">Morning standup</h3>
+<div class="mtg-sub" id="mtgSub">—</div>
+</div>
+<span class="mtg-live">Live</span>
+<span class="mtg-timer" id="mtgTimer">—</span>
+</div>
+<div class="mtg-body" id="mtgBody"></div>
+<div class="mtg-foot" id="mtgFoot">
+<div class="mtg-ask" id="mtgAsk"></div>
+<div class="mtg-prep" id="mtgPrep" style="display:none"></div>
+<textarea class="mtg-ta" id="mtgInput" placeholder="Your update to the room…"></textarea>
+<div class="mtg-actions">
+<button class="mtg-send" id="mtgSend" onclick="submitMeeting()">Give update</button>
+<button class="mtg-skip" onclick="closeMeeting()">Not now</button>
+<span class="mtg-verdict" id="mtgVerdict"></span>
+</div>
+</div>
+</div>
+</div>
 <!-- BEGINNER STICKY HINT -->
 <div class="hint-note" id="hintNote">
 <div class="hn-h">💡 Hint<button class="hn-x" onclick="dismissHint()" title="Hide hints">✕</button></div>
@@ -1389,7 +1453,7 @@ button{cursor:pointer}
 <button class="tb" onclick="tw('tasks')" id="tbTasks">Tasks</button>
 <button class="tb" onclick="tw('chat')" id="tbChat">Slack</button>
 <button class="tb" onclick="openGuide()" id="tbGuide" style="display:none;background:rgba(251,191,36,0.16);color:#fcd34d">📖 Guide</button>
-<div class="tbr"><span class="tbs" id="simClock" title="Simulation time · real time remaining" style="display:none;background:linear-gradient(180deg,#6366f1,#4f46e5)">09:00 · 2h 00m</span><button class="day-pill" id="dayPill" onclick="advanceDay()" style="display:none">+1 Day · Day 1/5</button><span class="tbs" id="tbrep" title="Workplace conduct standing">✓ Good Standing</span><span class="tbs" id="tbsc">0 pts</span><button class="tb" onclick="bh()" style="background:rgba(255,255,255,0.05);color:#cbd5e1">← Back to Roles</button><button class="tb" onclick="ed()" style="background:rgba(220,38,38,0.2);color:#fca5a5">End Day</button></div>
+<div class="tbr"><span class="tbs" id="simClock" title="Simulation time · real time remaining" style="display:none;background:linear-gradient(180deg,#6366f1,#4f46e5)">09:00 · 2h 00m</span><button class="mtg-pill" id="mtgPill" onclick="openMeeting()">Standup 11:00</button><button class="day-pill" id="dayPill" onclick="advanceDay()" style="display:none">+1 Day · Day 1/5</button><span class="tbs" id="tbrep" title="Workplace conduct standing">✓ Good Standing</span><span class="tbs" id="tbsc">0 pts</span><button class="tb" onclick="bh()" style="background:rgba(255,255,255,0.05);color:#cbd5e1">← Back to Roles</button><button class="tb" onclick="ed()" style="background:rgba(220,38,38,0.2);color:#fca5a5">End Day</button></div>
 </div>
 <script>
 const A='';let ce=null,ds=null,cc=null,ct='bank',currentUser=null;
@@ -1923,8 +1987,132 @@ async function _pollSimClock(){
       try{toast('Day complete — your performance review is ready','info')}catch(e){}
       try{ed()}catch(e){}
     }
+    try{_syncMeetings(d.meetings||[])}catch(e){}
   }catch(e){}
 }
+
+// ── TIMED MEETINGS ───────────────────────────────────────────────
+// State arrives on the existing 10s sim-clock poll. The pill mirrors it; the
+// scene auto-opens once when the meeting goes live.
+let _mtg=null,_mtgAutoOpened={},_mtgBusy=false;
+function _syncMeetings(list){
+  const pill=document.getElementById('mtgPill');if(!pill)return;
+  const m=(list||[])[0];
+  _mtg=m||null;
+  if(!m){pill.classList.remove('on');return}
+  pill.className='mtg-pill on';
+  const label=(m.title||'Meeting').replace(/^Morning /,'');
+  if(m.state==='pending'){pill.classList.add('soon');pill.textContent='📅 '+label+' '+m.sim_time}
+  else if(m.state==='notified'){pill.classList.add('soon');pill.textContent='⏰ '+label+' in '+_fmtRemaining(m.opens_in_real_sec)}
+  else if(m.state==='open'){pill.classList.add('live');pill.textContent='🔴 '+label+' — join now ('+_fmtRemaining(m.closes_in_real_sec)+')'}
+  else if(m.state==='attended'){pill.classList.add('done');pill.textContent='✓ '+label+' done'+(m.score!=null?' · '+(m.score>0?'+':'')+m.score+'pts':'')}
+  else if(m.state==='missed'){pill.classList.add('gone');pill.textContent='✕ '+label+' missed'}
+  // auto-open once when it goes live and hasn't been answered
+  if(m.state==='open'&&!m.submitted&&!_mtgAutoOpened[m.id]){
+    _mtgAutoOpened[m.id]=true;openMeeting();
+  }
+  const ov=document.getElementById('mtgOverlay');
+  if(ov&&ov.classList.contains('on')){
+    const t=document.getElementById('mtgTimer');
+    if(t)t.textContent=m.state==='open'?_fmtRemaining(m.closes_in_real_sec)+' left':'closed';
+    if(m.state==='missed'){toast('The meeting ended without your update.','error');closeMeeting()}
+  }
+}
+async function openMeeting(){
+  if(!_mtg)return;
+  if(_mtg.state!=='open'){
+    toast(_mtg.state==='missed'?'That meeting is over.':'Not started yet — '+_mtg.title+' at '+_mtg.sim_time,'info');
+    return;
+  }
+  try{
+    const r=await fetch(A+'/api/meetings/'+encodeURIComponent(_mtg.id));
+    if(!r.ok)return;
+    const d=await r.json();
+    document.getElementById('mtgTitle').textContent=d.meeting.title+' · '+d.meeting.sim_time;
+    document.getElementById('mtgSub').textContent=(d.people&&d.people.manager?d.people.manager.name:'')+' · '+(d.people&&d.people.teammate?d.people.teammate.name:'')+' · you';
+    document.getElementById('mtgTimer').textContent=_fmtRemaining(d.meeting.closes_in_real_sec)+' left';
+    document.getElementById('mtgAsk').innerHTML='<b>The ask:</b> '+esc(d.meeting.ask||'');
+    const prep=document.getElementById('mtgPrep');
+    if(_isBeginner&&(d.meeting.prep||[]).length){
+      prep.style.display='block';
+      prep.innerHTML='A good update covers:<ul>'+d.meeting.prep.map(function(p){return '<li>'+esc(p)+'</li>'}).join('')+'</ul>';
+    }else{prep.style.display='none'}
+    const done=d.meeting.submitted||(d.transcript||[]).length>0;
+    document.getElementById('mtgBody').innerHTML='';
+    document.getElementById('mtgVerdict').textContent='';
+    document.getElementById('mtgOverlay').classList.add('on');
+    if(done){
+      (d.transcript||[]).forEach(function(t){_mtgTurn(t.who,t.name,t.text)});
+      _mtgLock('You’ve already given your update.');
+    }else{
+      await _mtgPlay(d.opening||[]);
+      const ta=document.getElementById('mtgInput');if(ta){ta.disabled=false;ta.focus()}
+    }
+  }catch(e){console.warn('meeting open failed',e)}
+}
+// Play the scripted opening with realistic beats so it feels synchronous.
+async function _mtgPlay(beats){
+  const body=document.getElementById('mtgBody');
+  for(const b of beats){
+    const t=document.createElement('div');t.className='mtg-typing';
+    t.textContent=b.name+' is speaking…';body.appendChild(t);body.scrollTop=body.scrollHeight;
+    await new Promise(function(r){setTimeout(r,700+Math.min(1400,(b.text||'').length*12))});
+    t.remove();_mtgTurn(b.who,b.name,b.text,b.role);
+  }
+}
+function _mtgTurn(who,name,text,role){
+  const body=document.getElementById('mtgBody');if(!body)return;
+  const initials=(name||'?').split(/\s+/).map(function(x){return x[0]}).join('').slice(0,2).toUpperCase();
+  const d=document.createElement('div');
+  d.className='mtg-turn'+(who==='you'?' you':'');
+  d.innerHTML='<div class="mtg-av">'+esc(initials)+'</div><div><div class="mtg-who">'+esc(name||'')
+    +(role?' <span>'+esc(role)+'</span>':'')+'</div><div class="mtg-text">'+esc(text||'')+'</div></div>';
+  body.appendChild(d);body.scrollTop=body.scrollHeight;
+}
+function _mtgLock(msg){
+  const ta=document.getElementById('mtgInput'),s=document.getElementById('mtgSend');
+  if(ta){ta.disabled=true;ta.placeholder=msg||'Closed.';ta.value=''}
+  if(s)s.disabled=true;
+}
+async function submitMeeting(){
+  if(_mtgBusy||!_mtg)return;
+  const ta=document.getElementById('mtgInput');
+  const txt=(ta&&ta.value||'').trim();
+  if(txt.length<10){toast('Give them something to work with — a sentence or two at least.','error');return}
+  _mtgBusy=true;
+  const btn=document.getElementById('mtgSend');if(btn){btn.disabled=true;btn.textContent='Speaking…'}
+  _mtgTurn('you','You',txt);
+  if(ta){ta.value='';ta.disabled=true}
+  const body=document.getElementById('mtgBody');
+  const ind=document.createElement('div');ind.className='mtg-typing';ind.textContent='The room is responding…';
+  body.appendChild(ind);body.scrollTop=body.scrollHeight;
+  try{
+    const r=await fetch(A+'/api/meetings/'+encodeURIComponent(_mtg.id)+'/submit',
+      {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({summary:txt})});
+    const d=await r.json();
+    ind.remove();
+    if(!r.ok){toast(_errMsg(d)||'Could not submit','error');if(btn){btn.disabled=false;btn.textContent='Give update'}_mtgBusy=false;return}
+    for(const t of (d.turns||[])){
+      await new Promise(function(x){setTimeout(x,600)});
+      _mtgTurn(t.who,t.name,t.text);
+    }
+    const v=document.getElementById('mtgVerdict');
+    const acc=d.accuracy||'vague';
+    v.className='mtg-verdict '+(acc==='accurate'?'good':acc==='overstated'?'bad':'mid');
+    v.textContent=(acc==='accurate'?'Accurate':acc==='overstated'?'Overstated':acc==='incomplete'?'Incomplete':'Vague')
+      +' · '+(d.points>0?'+':'')+d.points+' pts'+(d.late?' (late)':'');
+    _mtgLock('Update given.');
+    if(btn)btn.textContent='Done';
+    try{uc()}catch(e){}
+    try{lt()}catch(e){}
+  }catch(e){
+    ind.remove();toast('Network error giving your update','error');
+    if(btn){btn.disabled=false;btn.textContent='Give update'}
+    if(ta)ta.disabled=false;
+  }
+  _mtgBusy=false;
+}
+function closeMeeting(){document.getElementById('mtgOverlay').classList.remove('on')}
 function _startSimClockPoll(){if(_simClockTimer)return;_simClockEnded=false;_pollSimClock();_simClockTimer=setInterval(_pollSimClock,10000)}
 function _stopSimClockPoll(){if(_simClockTimer){clearInterval(_simClockTimer);_simClockTimer=null}const el=document.getElementById('simClock');if(el){el.style.display='none';el.classList.remove('urgent')}}
 async function advanceDay(){
