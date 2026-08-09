@@ -954,7 +954,7 @@ button{cursor:pointer}
 .sl-head-pin:hover{background:rgba(0,0,0,0.05);color:#0a0a0c}
 .sl-head-pin .pn{font-size:11px}
 /* Modal — Apple sheet style with material backdrop */
-.mo{position:fixed;inset:0;background:rgba(15,23,42,0.42);-webkit-backdrop-filter:blur(8px) saturate(140%);backdrop-filter:blur(8px) saturate(140%);display:none;align-items:center;justify-content:center;z-index:500;padding:24px;animation:moFadeIn .22s var(--ease-out)}
+.mo{position:fixed;inset:0;background:rgba(15,23,42,0.42);-webkit-backdrop-filter:blur(8px) saturate(140%);backdrop-filter:blur(8px) saturate(140%);display:none;align-items:center;justify-content:center;z-index:9600;padding:24px;animation:moFadeIn .22s var(--ease-out)}
 .mo.on{display:flex}
 @keyframes moFadeIn{from{opacity:0}to{opacity:1}}
 .mod{background:rgba(252,252,254,0.98);-webkit-backdrop-filter:saturate(180%) blur(28px);backdrop-filter:saturate(180%) blur(28px);border-radius:16px;padding:0;width:420px;max-width:100%;max-height:88vh;display:flex;flex-direction:column;overflow:hidden;font-family:-apple-system,'SF Pro Text',var(--font-sans);box-shadow:0 0 0 0.5px rgba(0,0,0,0.08),0 30px 80px -16px rgba(0,0,0,0.40),0 60px 160px -40px rgba(0,0,0,0.50);animation:modIn .28s var(--ease-out)}
@@ -1482,8 +1482,8 @@ window.fetch=function(url,opts){
     return r;
   });
 };
-function showAuth(){document.body.classList.remove('desk-mode');document.getElementById('authScreen').classList.add('on');document.getElementById('careerSelect').classList.remove('on');document.getElementById('desktop').classList.remove('active');document.getElementById('taskbar').classList.remove('active');document.querySelector('.brand').style.display='flex';const gb=document.getElementById('guestBanner');if(gb)gb.classList.remove('on');try{_stopSimClockPoll()}catch(e){}try{_resetBeginnerAids()}catch(e){}window.scrollTo(0,0)}
-function showLanding(){document.body.classList.remove('desk-mode');document.getElementById('authScreen').classList.remove('on');document.getElementById('careerSelect').classList.add('on');document.getElementById('desktop').classList.remove('active');document.getElementById('taskbar').classList.remove('active');document.querySelector('.brand').style.display='flex';try{_stopSimClockPoll()}catch(e){}try{_resetBeginnerAids()}catch(e){}window.scrollTo(0,0);backToChooser();loadDashboard();try{_syncPaidUI()}catch(e){}}
+function showAuth(){try{closeAllModals()}catch(e){}document.body.classList.remove('desk-mode');document.getElementById('authScreen').classList.add('on');document.getElementById('careerSelect').classList.remove('on');document.getElementById('desktop').classList.remove('active');document.getElementById('taskbar').classList.remove('active');document.querySelector('.brand').style.display='flex';const gb=document.getElementById('guestBanner');if(gb)gb.classList.remove('on');try{_stopSimClockPoll()}catch(e){}try{_resetBeginnerAids()}catch(e){}window.scrollTo(0,0)}
+function showLanding(){try{closeAllModals()}catch(e){}document.body.classList.remove('desk-mode');document.getElementById('authScreen').classList.remove('on');document.getElementById('careerSelect').classList.add('on');document.getElementById('desktop').classList.remove('active');document.getElementById('taskbar').classList.remove('active');document.querySelector('.brand').style.display='flex';try{_stopSimClockPoll()}catch(e){}try{_resetBeginnerAids()}catch(e){}window.scrollTo(0,0);backToChooser();loadDashboard();try{_syncPaidUI()}catch(e){}}
 const _PAID_PLANS=['pro','premium','team','enterprise'];
 function _isPaidUser(){return !!(currentUser&&currentUser.plan&&_PAID_PLANS.indexOf(currentUser.plan)>=0)}
 function openPaywall(){const m=document.getElementById('paywall');if(m)m.classList.add('on')}
@@ -1642,6 +1642,22 @@ function closeModalA11y(modalId){
   const reg=_modalRegistry.get(modalId);
   if(reg&&reg.lastFocus&&reg.lastFocus.focus)reg.lastFocus.focus();
 }
+// Dismiss every open overlay. Used on screen transitions so a fixed-position
+// modal can never survive into the next screen.
+function closeAllModals(){
+  document.querySelectorAll('[role="dialog"].on,.mo.on').forEach(m=>{
+    const reg=_modalRegistry.get(m.id);
+    if(reg&&reg.close){try{reg.close()}catch(e){m.classList.remove('on')}}
+    else m.classList.remove('on');
+  });
+}
+// Backdrop click closes the modal — matches #paywall and #guideOverlay.
+document.addEventListener('click',(e)=>{
+  const t=e.target;
+  if(!t.classList||!t.classList.contains('mo')||!t.classList.contains('on'))return;
+  const reg=_modalRegistry.get(t.id);
+  if(reg&&reg.close)reg.close();else{t.classList.remove('on');closeModalA11y(t.id)}
+});
 document.addEventListener('keydown',(e)=>{
   if(e.key!=='Escape')return;
   // Find topmost open modal (last .on element with role=dialog)
@@ -3398,6 +3414,9 @@ window.addEventListener('DOMContentLoaded',()=>{
   registerModal('fm',cfm);
   registerModal('sm',csm);
   registerModal('eod',ceod);
+  // Non-.mo overlays — register so ESC and the focus trap see the whole stack.
+  registerModal('mtgOverlay',closeMeeting);
+  registerModal('guideOverlay',closeGuide);
 });
 // Offline detection — fixed banner toggles on connection loss.
 (function(){
