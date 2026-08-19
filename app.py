@@ -116,6 +116,8 @@ slack_col = db["slack_messages"]
 # Generic tool surfaces (table / sql / kanban / dashboard / alerts / editor /
 # terminal / crm). Scenario-driven; the desktop renders them dynamically.
 tools_col = db["tools"]
+# New-starter HR checklist (bank / emergency / right-to-work). One doc per sim.
+hr_onboarding_col = db["hr_onboarding"]
 # Interview Practice — standalone or post-simulation. One doc per attempt.
 interviews_col = db["interviews"]
 # Analytics — append-only event log (user_registered, simulation_started, etc.).
@@ -547,9 +549,45 @@ CAREER_CONFIGS = {
 # ══════════════════════════════════════════
 
 def clear_sim():
-    for c in [emails_col, tasks_col, sheets_col, invoices_col, evals_col, memory_col, actions_col, agent_comms_col, system_events_col, siem_col, jira_col, campaigns_col, slack_col, tools_col]:
+    for c in [emails_col, tasks_col, sheets_col, invoices_col, evals_col, memory_col, actions_col, agent_comms_col, system_events_col, siem_col, jira_col, campaigns_col, slack_col, tools_col, hr_onboarding_col]:
         c.delete_many({"simulation_id": sim_id()})
     reputation_col.delete_many({"simulation_id": sim_id()})
+
+
+HR_PORTAL_LINK = "[Open HR portal](firstdesk://hr-onboarding)"
+_HR_PORTAL_HINTS = (
+    "hr portal", "onboarding form", "starter checklist", "right to work",
+    "right-to-work", "bank details", "emergency contact", "attached document",
+    "new starter checklist",
+)
+
+
+def _looks_like_hr_portal_text(*parts: str) -> bool:
+    blob = " ".join(p or "" for p in parts).lower()
+    return any(h in blob for h in _HR_PORTAL_HINTS)
+
+
+def _ensure_hr_portal_link(body: str) -> str:
+    """Scenario emails often invent a portal/attachment that does not exist.
+    Rewrite those bodies so the in-sim HR checklist is actually clickable."""
+    if not body:
+        return body
+    if "firstdesk://hr-onboarding" in body:
+        return body
+    if not _looks_like_hr_portal_text(body):
+        return body
+    return body.rstrip() + "\n\nOpen the new-starter checklist here: " + HR_PORTAL_LINK
+
+
+def _is_onboarding_forms_task(t: dict) -> bool:
+    steps = " ".join((s.get("action") or "") for s in (t.get("tool_workflow") or []))
+    return _looks_like_hr_portal_text(t.get("title", ""), t.get("description", ""), steps)
+
+
+def _hr_onboarding_submitted() -> Optional[dict]:
+    return hr_onboarding_col.find_one(
+        {"simulation_id": sim_id(), "submitted": True}, {"_id": 0}
+    )
 
 def _seed_accountant_artifacts(cfg):
     """Career-specific Sage data (spreadsheets, invoices, system events).
@@ -2876,6 +2914,11 @@ def get_tasks() -> str:
 @tool
 def complete_task(task_id: str) -> str:
     """Mark task as done. Awards a SMALL completion credit (20% of task points). The remaining 80% is held until the manager reviews the actual work via manager_review_task and is happy with quality."""
+    t = tasks_col.find_one({"id": task_id, "simulation_id": sim_id()}, {"_id": 0})
+    if not t:
+        return "Not found or already reviewed."
+    if _is_onboarding_forms_task(t) and not _hr_onboarding_submitted():
+        return "Blocked: the HR portal checklist has not been submitted. Tell the user to open the HR portal from the onboarding email first."
     r = tasks_col.update_one({"id": task_id, "simulation_id": sim_id(), "review_status": {"$ne": "approved"}}, {"$set": {"status": "done", "review_status": "pending_review", "completed_at": datetime.utcnow().isoformat()}})
     if r.modified_count == 0: return "Not found or already reviewed."
     t = tasks_col.find_one({"id": task_id}, {"_id": 0})
@@ -2917,7 +2960,7 @@ def manager_review_task(task_id: str, verdict: str, feedback: str) -> str:
 
 @tool
 def get_tool_data(tool_name: str) -> str:
-    """Get data from a career-specific tool: sage_bank, sage_ledger, sage_invoices, siem_alerts, jira_tickets, campaigns, po_approvals, vendor_catalog, training_programs, learner_pipeline, roadmap, feature_requests, risk_register, control_library."""
+    """Get data from a career-specific tool: sage_bank, sage_ledger, sage_invoices, siem_alerts, jira_tickets, campaigns, po_approvals, vendor_catalog, training_programs, learner_pipeline, roadmap, feature_requests, risk_register, control_library, hr_onboarding."""
     if tool_name == "sage_bank":
         s = sheets_col.find_one({"simulation_id": sim_id()}, {"_id": 0})
         if not s: return "No data."
@@ -3004,6 +3047,16 @@ def get_tool_data(tool_name: str) -> str:
         msgs = list(slack_col.find({"simulation_id": sim_id()}, {"_id": 0}).sort("ts", -1).limit(80))
         msgs.reverse()
         return "\n".join([f"[{m.get('channel','#general')}] {m.get('author','?')}: {m.get('text','')}" for m in msgs]) or "No Slack activity yet."
+    elif tool_name in ("hr_onboarding", "hr_portal"):
+        doc = _hr_onboarding_submitted()
+        if not doc:
+            return "HR portal: NOT SUBMITTED. The new-starter checklist is empty."
+        return (
+            f"HR portal: SUBMITTED at {doc.get('submitted_at')}. "
+            f"Emergency contact: {doc.get('emergency_name')} ({doc.get('emergency_phone')}). "
+            f"Right to work: {doc.get('right_to_work')}. "
+            f"Bank details on file (sort {doc.get('sort_code')}, account ending {str(doc.get('account_number') or '')[-4:]})."
+        )
     return f"Unknown tool: {tool_name}"
 
 @tool
@@ -3738,7 +3791,8 @@ MANAGER TASK REVIEW (this is the PRIMARY scoring mechanism — most points come 
 - Just clicking "complete" only earns the user 20% of a task's points (a small "completion credit").
 - The remaining 80% (the "manager satisfaction bonus") is ONLY awarded if YOU, as the manager, review the work and approve it via manager_review_task.
 - On EVERY response, call get_tasks first to look for tasks with review_status="pending_review". If any exist, you MUST review them BEFORE replying conversationally.
-- To review properly, EXAMINE THE EVIDENCE — use get_tool_data (sage_ledger / sage_invoices / siem_alerts / jira_tickets / campaigns) and read_email to see what the user actually did. Did they post the right journal? Reply to the client? Update the campaign with the correct brand colour? Triage the alert correctly?
+- To review properly, EXAMINE THE EVIDENCE — use get_tool_data (sage_ledger / sage_invoices / siem_alerts / jira_tickets / campaigns / hr_onboarding) and read_email to see what the user actually did. Did they post the right journal? Reply to the client? Update the campaign with the correct brand colour? Triage the alert correctly? Submit the HR portal checklist?
+- For onboarding / HR portal / starter-checklist / bank-details tasks: call get_tool_data("hr_onboarding") FIRST. If it says SUBMITTED, that is the evidence — approve and cite the portal submission. Do not demand a handwritten reply if the portal already filed a confirmation to HR. If it says NOT SUBMITTED, mark needs_rework and tell them to open the HR portal from the HR email (not just click Complete).
 - Then call manager_review_task(task_id, verdict, feedback):
   * verdict="approved" — work is solid, evidence backs it up. Pays 80% of task points. Feedback MUST cite a specific artifact ("Saw your journal posting £150 to Petty Cash — clean entry, ties to the bank statement"). Generic praise is forbidden.
   * verdict="needs_rework" — task marked done but evidence is missing or incomplete (no journal posted, no email reply sent, alert not triaged). Pays nothing, reopens the task. Feedback must say WHAT'S MISSING.
@@ -4431,6 +4485,21 @@ class CampaignUpdateReq(BaseModel):
     tone: SafeOptStr = Field(None, max_length=200)
     status: Optional[str] = None  # in_progress | scheduled | live | paused
 
+class HrOnboardingReq(BaseModel):
+    sort_code: str = Field(..., min_length=5, max_length=10)
+    account_number: str = Field(..., min_length=6, max_length=12)
+    emergency_name: SafeStr = Field(..., min_length=2, max_length=80)
+    emergency_phone: SafeStr = Field(..., min_length=7, max_length=24)
+    right_to_work: bool = False
+
+    @field_validator("sort_code", "account_number")
+    @classmethod
+    def _digits_only(cls, v: str) -> str:
+        cleaned = re.sub(r"[^\d]", "", v or "")
+        if not cleaned:
+            raise ValueError("Must contain digits")
+        return cleaned
+
 # ── ERROR ENVELOPE HELPERS ────────────────────────────────────────
 APP_VERSION = os.environ.get("APP_VERSION", "0.1.0")
 
@@ -5053,6 +5122,9 @@ async def api_inbox():
     _q1 = asyncio.to_thread(lambda: list(emails_col.find({"simulation_id": _sim, "$or": [{"day": {"$lte": _day}}, {"day": {"$exists": False}}]}, {"_id": 0}).sort("time", 1)))
     _q2 = asyncio.to_thread(lambda: list(agent_comms_col.find({"simulation_id": _sim, "visible_to_user": True}, {"_id": 0}).sort("timestamp", 1)))
     mails, comms = await asyncio.gather(_q1, _q2)
+    for e in mails:
+        if e.get("body"):
+            e["body"] = _ensure_hr_portal_link(e["body"])
     # Convert agent comms to email format for the frontend
     for c in comms:
         mails.append({"id": c["id"], "from_name": c["from_agent"], "from_role": f"→ {c['to_agent']} (CC: you)", "from_email": "", "to": c["to_agent"], "subject": c["subject"], "body": c["body"], "time": c.get("timestamp", ""), "read": False, "replied": False, "priority": "medium", "category": "agent_comm", "requires_action": False})
@@ -5067,6 +5139,15 @@ async def api_tasks():
 async def api_complete_task(task_id: str):
     """User-side completion. Awards the small (20%) completion credit. The remaining
     80% only lands when the manager reviews the work via manager_review_task."""
+    t = tasks_col.find_one({"id": task_id, "simulation_id": sim_id()}, {"_id": 0})
+    if not t:
+        return _err("not_found", "Task not found.", status=404)
+    if _is_onboarding_forms_task(t) and not _hr_onboarding_submitted():
+        return _err(
+            "hr_portal_required",
+            "Open the HR portal from the onboarding email and submit the checklist before marking this done.",
+            status=400,
+        )
     r = tasks_col.update_one(
         {"id": task_id, "simulation_id": sim_id(), "review_status": {"$ne": "approved"}},
         {"$set": {"status": "done", "review_status": "pending_review", "completed_at": datetime.utcnow().isoformat()}},
@@ -5083,6 +5164,67 @@ async def api_complete_task(task_id: str):
     emit("task_completed", {"task": t})
     return {"ok": True, "task": t, "completion_credit": completion_credit, "awaiting_review": True,
             "message": f"+{completion_credit}pts completion credit. Manager will review your work for the rest."}
+
+@app.get("/api/hr/onboarding")
+async def api_hr_onboarding_get():
+    doc = hr_onboarding_col.find_one({"simulation_id": sim_id()}, {"_id": 0}) or {}
+    return {"submitted": bool(doc.get("submitted")), "record": doc or None}
+
+@app.post("/api/hr/onboarding")
+async def api_hr_onboarding_submit(req: HrOnboardingReq):
+    """File the in-sim new-starter checklist. This is the missing 'HR portal'."""
+    if not req.right_to_work:
+        return _err("right_to_work_required", "You must confirm right to work before submitting.")
+    if len(req.sort_code) < 6 or len(req.account_number) < 8:
+        return _err("invalid_bank_details", "Enter a 6-digit sort code and 8-digit account number (simulation data is fine).")
+    now = datetime.utcnow().isoformat()
+    uid = user_id() or ""
+    rec = {
+        "simulation_id": sim_id(),
+        "user_id": uid,
+        "submitted": True,
+        "submitted_at": now,
+        "sort_code": req.sort_code,
+        "account_number": req.account_number,
+        "emergency_name": req.emergency_name,
+        "emergency_phone": req.emergency_phone,
+        "right_to_work": True,
+    }
+    hr_onboarding_col.update_one(
+        {"simulation_id": sim_id()},
+        {"$set": rec},
+        upsert=True,
+    )
+    confirmation = (
+        "Hi,\n\nI've submitted the new-starter checklist in the HR portal "
+        f"(bank details, emergency contact {req.emergency_name}, right-to-work confirmation).\n\nThanks"
+    )
+    hr_mails = list(emails_col.find({
+        "simulation_id": sim_id(),
+        "replied": {"$ne": True},
+        "$or": [
+            {"from_role": {"$regex": "hr", "$options": "i"}},
+            {"category": "onboarding"},
+        ],
+    }))
+    replied_ids = []
+    for e in hr_mails:
+        if not _looks_like_hr_portal_text(e.get("subject", ""), e.get("body", "")):
+            continue
+        emails_col.update_one(
+            {"id": e["id"], "simulation_id": sim_id()},
+            {"$set": {"replied": True, "reply_text": confirmation}},
+        )
+        replied_ids.append(e["id"])
+        sessions_col.update_one(
+            {"session_id": session_id()},
+            {"$addToSet": {"emails_replied": e["id"]}},
+        )
+    try:
+        _post_slack_system("#general", "You", "Submitted my new-starter HR forms via the portal.")
+    except Exception:
+        pass
+    return {"ok": True, "submitted": True, "replied_email_ids": replied_ids}
 
 @app.get("/api/spreadsheet")
 async def api_sheet():

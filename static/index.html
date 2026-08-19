@@ -461,6 +461,8 @@ button{cursor:pointer}
 .mdm{font-size:12px;color:#6b7280;flex:1;line-height:1.55;letter-spacing:-0.005em}
 .mdm b{color:#0a0a0c;font-size:13px;font-weight:600}
 .mdy{flex:1;min-height:160px;padding:22px 28px;font-size:13.5px;line-height:1.75;color:#1d1d1f;white-space:pre-wrap;overflow-y:auto;font-family:-apple-system,'SF Pro Text',var(--font-sans);letter-spacing:-0.005em}
+.mdy a.hr-portal-link{display:inline-block;margin-top:10px;padding:7px 12px;border-radius:8px;background:#2563EB;color:#fff;text-decoration:none;font-size:12.5px;font-weight:600;letter-spacing:-0.01em}
+.mdy a.hr-portal-link:hover{filter:brightness(1.08)}
 .mra{padding:0;border-top:0.5px solid rgba(0,0,0,0.08);background:#fff;flex:0 0 auto;display:flex;flex-direction:column;overflow:hidden;position:relative}
 .mra:not(.expanded){height:48px}
 .mra.expanded{position:absolute;left:0;right:0;bottom:0;height:320px;background:#fff;border-top:0.5px solid rgba(0,0,0,0.10);box-shadow:0 -8px 24px rgba(0,0,0,0.08);z-index:10;padding-bottom:54px}
@@ -1400,6 +1402,8 @@ button{cursor:pointer}
 <div class="mo" id="cum"><div class="mod"><h3>📣 Update <span id="cumId" style="color:#0078d4"></span></h3><div id="cumCtx" style="font-size:12px;color:#605e5c;margin-bottom:8px"></div><label>Post copy</label><textarea id="cumContent" placeholder="The body of your social post..." style="width:100%;min-height:80px"></textarea><label>Brand colour (hex)</label><input id="cumColour" placeholder="#0D9488"><label>Tone</label><input id="cumTone" placeholder="bold and innovative"><label>Status</label><select id="cumStatus"><option value="">— no change —</option><option value="in_progress">In Progress</option><option value="scheduled">Scheduled</option><option value="live">Live</option><option value="paused">Paused</option></select><div class="mod-btns"><button class="cc" onclick="ccum()">Cancel</button><button class="ss" onclick="updateCampaign()">Submit</button></div></div></div>
 <!-- Jira Update Modal -->
 <div class="mo" id="jum"><div class="mod"><h3>🎫 Update <span id="jumId" style="color:#0078d4"></span></h3><div id="jumCtx" style="font-size:12px;color:#605e5c;margin-bottom:8px"></div><label>Status</label><select id="jumStatus"><option value="">— no change —</option><option value="open">Open</option><option value="in_progress">In Progress</option><option value="in_review">In Review</option><option value="closed">Closed</option></select><label>Resolution (if closing)</label><select id="jumRes"><option value="">— no change —</option><option value="fixed">Fixed</option><option value="wont_fix">Won't Fix</option><option value="false_positive">False Positive</option><option value="duplicate">Duplicate</option></select><label>Comment</label><textarea id="jumComment" placeholder="What did you do? Why?" style="width:100%;min-height:60px"></textarea><div class="mod-btns"><button class="cc" onclick="cjum()">Cancel</button><button class="ss" onclick="updateTicket()">Update</button></div></div></div>
+<!-- HR Portal (new-starter checklist) -->
+<div class="mo" id="hrp"><div class="mod"><h3>HR portal — new starter checklist</h3><p style="font-size:12px;color:#605e5c;margin:0 0 12px;line-height:1.5">Simulation only — use any plausible UK details. Submitting files the checklist HR asked for.</p><div id="hrpDone" style="display:none;font-size:13px;color:#047857;margin-bottom:10px">Checklist already submitted.</div><label>Sort code</label><input id="hrpSort" placeholder="04-00-04" autocomplete="off"><label>Account number</label><input id="hrpAcct" placeholder="12345678" autocomplete="off"><label>Emergency contact name</label><input id="hrpEmerName" placeholder="Full name" autocomplete="off"><label>Emergency contact phone</label><input id="hrpEmerPhone" placeholder="07…" autocomplete="off"><label style="display:flex;align-items:flex-start;gap:8px;font-weight:400;margin-top:8px"><input type="checkbox" id="hrpRtw" style="margin-top:3px"><span>I confirm I have the right to work in the UK</span></label><div class="mod-btns"><button class="cc" onclick="closeHrPortal()">Cancel</button><button class="ss" onclick="submitHrPortal()">Submit checklist</button></div></div></div>
 <!-- End-of-day Modal -->
 <div class="mo" id="eod"><div class="eod-mod"><h2>End of Day</h2><div class="eod-sub" id="eodSub">Performance review</div><div class="eod-score"><div class="num" id="eodNum">0</div><div class="out">/ 100</div><span class="eod-grade" id="eodGrade" style="display:none"></span></div><div class="eod-level" id="eodLvl">In progress</div><div class="eod-meta" id="eodMeta"></div><div class="eod-dims" id="eodDims"></div><div class="eod-bd" id="eodBd"></div><div class="eod-notes" id="eodNotes" style="display:none"><h4>Manager Notes</h4><ul id="eodNotesList"></ul></div><div class="eod-actions"><button class="sec" onclick="ceod()">Close</button><button class="sec" onclick="bh()">Try Another Role</button><button class="pri" id="eodNextDayBtn" onclick="startNextDay()" style="display:none">Continue to Day 2 →</button></div></div></div>
 <!-- Loading Overlay -->
@@ -1689,10 +1693,11 @@ const ICONS={
   sage:'<svg viewBox="0 0 24 24"><path d="M3.5 20h17"/><rect x="6" y="11" width="3" height="8" rx="0.5"/><rect x="11" y="6.5" width="3" height="12.5" rx="0.5"/><rect x="16" y="13.5" width="3" height="5.5" rx="0.5"/></svg>',
   siem:'<svg viewBox="0 0 24 24"><path d="M12 3.5 4.5 6.2v5.6c0 4.3 3.2 8.2 7.5 8.7 4.3-.5 7.5-4.4 7.5-8.7V6.2L12 3.5z"/><path d="m9.5 12 2 2 3.5-4"/></svg>',
   campaigns:'<svg viewBox="0 0 24 24"><path d="M3.5 10.5v3l11 5V5.5l-11 5z"/><path d="M14.5 8v8"/><path d="M18 9.5l3-1.5v8l-3-1.5"/><path d="M7 14v3.5"/></svg>',
-  jira:'<svg viewBox="0 0 24 24"><path d="m9 17-5-5 5-5"/><path d="m15 7 5 5-5 5"/></svg>'
+  jira:'<svg viewBox="0 0 24 24"><path d="m9 17-5-5 5-5"/><path d="m15 7 5 5-5 5"/></svg>',
+  hr:'<svg viewBox="0 0 24 24"><rect x="5" y="3.5" width="14" height="17" rx="2"/><path d="M8 8h8M8 12h8M8 16h5"/></svg>'
 };
 function setIcon(el,name){const s=ICONS[name];if(el&&s)el.innerHTML=s}
-function mdStrip(text){return String(text||'').replace(/`([^`]+)`/g,'$1').replace(/\*\*([^*]+)\*\*/g,'$1').replace(/(^|[\s(])\*([^*]+)\*/g,'$1$2').replace(/\[([^\]]+)\]\(https?:\/\/[^\s)]+\)/g,'$1')}
+function mdStrip(text){return String(text||'').replace(/`([^`]+)`/g,'$1').replace(/\*\*([^*]+)\*\*/g,'$1').replace(/(^|[\s(])\*([^*]+)\*/g,'$1$2').replace(/\[([^\]]+)\]\((?:https?:\/\/[^\s)]+|firstdesk:\/\/[^\s)]+)\)/g,'$1')}
 // Smooth integer count-up (respects reduced-motion)
 function animateCount(elId,target,durationMs){
   const el=document.getElementById(elId);if(!el)return;
@@ -1719,6 +1724,8 @@ function mdRender(text){
   s=s.replace(/\*\*([^*\n]+)\*\*/g,'<strong>$1</strong>');
   // italic *x* (single asterisks; avoid matching across other syntax)
   s=s.replace(/(^|[\s(])\*([^*\n]+)\*(?=[\s).,!?:;]|$)/g,'$1<em>$2</em>');
+  // links [t](firstdesk://hr-onboarding) — in-sim HR portal
+  s=s.replace(/\[([^\]]+)\]\(firstdesk:\/\/hr-onboarding\)/g,'<a href="#" class="hr-portal-link" onclick="event.preventDefault();openHrPortal()">$1</a>');
   // links [t](https://…)
   s=s.replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g,'<a href="$2" target="_blank" rel="noreferrer noopener">$1</a>');
   // bullets at line start
@@ -1824,7 +1831,7 @@ const extraIconMap={sheets:{icon:'tasks',name:'Sheets',tint:'#0F9D58'},jira:{ico
 let extraHtml='';
 if(tm){extras.forEach(t=>{const e=extraIconMap[t]||{icon:'tasks',name:t,tint:'#71717A'};const tab=(EXTRA_TAB[career]||{})[t]||PRIMARY_TAB[career];extraHtml+=`<div class="di" title="${t}" onclick="openToolTab('${tab}')"><div class="di-img" style="--tint:${e.tint}">${ICONS[e.icon]}</div><div class="di-lbl">${e.name}</div></div>`;});}
 const primaryHtml=tm?`<div class="di" onclick="openToolTab('${PRIMARY_TAB[career]}')"><div class="di-img" style="--tint:${tm.tint}">${ICONS[tm.icon]}</div><div class="di-lbl">${tm.name}</div></div>`:'';
-icons.innerHTML=`<div class="di" onclick="tw('outlook')"><div class="di-img" style="--tint:#2563EB">${ICONS.outlook}</div><div class="di-lbl">Outlook</div></div>`+primaryHtml+`<div class="di" onclick="tw('tasks')"><div class="di-img" style="--tint:#6366F1">${ICONS.tasks}</div><div class="di-lbl">Tasks</div></div><div class="di" onclick="tw('chat')"><div class="di-img" style="--tint:#0F766E">${ICONS.slack}</div><div class="di-lbl">Slack</div></div>`+extraHtml;
+icons.innerHTML=`<div class="di" onclick="tw('outlook')"><div class="di-img" style="--tint:#2563EB">${ICONS.outlook}</div><div class="di-lbl">Outlook</div></div>`+primaryHtml+`<div class="di" onclick="openHrPortal()"><div class="di-img" style="--tint:#0F766E">${ICONS.hr}</div><div class="di-lbl">HR Portal</div></div><div class="di" onclick="tw('tasks')"><div class="di-img" style="--tint:#6366F1">${ICONS.tasks}</div><div class="di-lbl">Tasks</div></div><div class="di" onclick="tw('chat')"><div class="di-img" style="--tint:#0F766E">${ICONS.slack}</div><div class="di-lbl">Slack</div></div>`+extraHtml;
 document.getElementById('toolTitle').textContent=tm?tm.name:'Tool';
 document.getElementById('toolName').textContent=tm?tm.name:'Tool';
 document.getElementById('tbTool').style.display=tm?'':'none';
@@ -2674,6 +2681,33 @@ async function ocum(id){try{const r=await fetch(A+'/api/campaigns');const d=awai
 function ccum(){document.getElementById('cum').classList.remove('on');closeModalA11y('cum')}
 async function updateCampaign(){const id=window._cumId;if(!id)return;const body={content:document.getElementById('cumContent').value||null,brand_colour:document.getElementById('cumColour').value||null,tone:document.getElementById('cumTone').value||null,status:document.getElementById('cumStatus').value||null};try{const d=await api.post('/api/campaign/'+id+'/update',body);ccum();if(d.flagged)toast('Manager flagged the update','error');else toast('Campaign '+id+' updated','success');loadTool('campaigns');li();uc()}catch(e){}}
 async function updateTicket(){const id=window._jumId;if(!id)return;const body={status:document.getElementById('jumStatus').value||null,resolution:document.getElementById('jumRes').value||null,comment:document.getElementById('jumComment').value||null};try{const d=await api.post('/api/jira/'+id+'/update',body);cjum();if(d.flagged)toast('Manager flagged the update','error');else toast('Ticket '+id+' updated','success');loadTool(ct==='jira'?'jira':'tickets');li();uc()}catch(e){}}
+function closeHrPortal(){document.getElementById('hrp').classList.remove('on');closeModalA11y('hrp')}
+async function openHrPortal(){
+  const m=document.getElementById('hrp');if(!m)return;
+  m.classList.add('on');openModalA11y('hrp');
+  const done=document.getElementById('hrpDone');
+  try{
+    const d=await api.get('/api/hr/onboarding',{silent:true});
+    if(d&&d.submitted){if(done)done.style.display='block'}
+    else if(done)done.style.display='none';
+  }catch(e){if(done)done.style.display='none'}
+}
+async function submitHrPortal(){
+  const sort=document.getElementById('hrpSort').value.trim();
+  const acct=document.getElementById('hrpAcct').value.trim();
+  const name=document.getElementById('hrpEmerName').value.trim();
+  const phone=document.getElementById('hrpEmerPhone').value.trim();
+  const rtw=!!(document.getElementById('hrpRtw')||{}).checked;
+  if(!sort||!acct||!name||!phone){toast('Fill every field','error');return}
+  if(!rtw){toast('Confirm right to work','error');return}
+  try{
+    await api.post('/api/hr/onboarding',{sort_code:sort,account_number:acct,emergency_name:name,emergency_phone:phone,right_to_work:true});
+    closeHrPortal();
+    toast('HR checklist submitted — Diane has a confirmation','success');
+    try{li()}catch(e){}
+    try{if(window.loadSlack)window.loadSlack()}catch(e){}
+  }catch(e){}
+}
 // Open the legacy #w-tool window (always show, no toggle), switch to a tab,
 // and load its data. Used by the desktop icons so SIEM / Jira / Sheets etc.
 // always show their own tab instead of just toggling the same window.
@@ -3338,7 +3372,7 @@ function ocd(id){
 }
 // Tasks
 async function lt(){const l=document.getElementById('tlist');if(l&&!l.dataset.loaded)l.innerHTML=skeletonRows(4);let d;try{d=await api.get('/api/tasks',{silent:true})}catch(e){if(l)l.innerHTML='<div class="empty"><div class="ico">⚠️</div><div class="t">Couldn\'t load tasks</div><div class="s">'+esc(e.message)+'</div></div>';return}if(l)l.dataset.loaded='1';l.innerHTML='';if(!d.tasks||!d.tasks.length){l.innerHTML='<div class="empty"><div class="ico">📋</div><div class="t">No tasks yet</div><div class="s">Your manager will assign work shortly. Stay sharp.</div></div>';return}d.tasks.forEach(t=>{const dn=t.status==='done';const rs=t.review_status||'';let badge='';if(rs==='approved')badge='<span class="tg low" style="background:#1a5e1f;color:#fff">✓ Manager approved</span>';else if(rs==='pending_review')badge='<span class="tg low" style="background:#b87900;color:#fff">⏳ Awaiting manager review</span>';else if(rs==='needs_rework')badge='<span class="tg low" style="background:#a3340c;color:#fff">↩ Rework requested</span>';else if(rs==='rejected')badge='<span class="tg low" style="background:#7a0e0e;color:#fff">✗ Rejected</span>';const aw=t.awarded_points!=null?`<span class="tg low">+${t.awarded_points}/${t.points}pts</span>`:`<span class="tg low">${t.points}pts</span>`;l.innerHTML+=`<div class="tr"><div class="tc ${dn?'done':''}" onclick="dt('${t.id}')">${dn?'✓':''}</div><div><div class="tt ${dn?'done':''}">${esc(t.title)}</div><div class="td">${esc(t.description)}</div><div class="tgs"><span class="tg ${t.priority}">${t.priority}</span><span class="tg low">Due: ${t.deadline}</span>${aw}${badge}</div></div></div>`})}
-async function dt(id){try{const j=await api.post('/api/task/'+id+'/complete',null,{silent:true});const msg=j.completion_credit?('+'+j.completion_credit+'pts — awaiting manager review'):'Task marked complete';toast(msg,'success');lt();uc();sm('I just marked task '+id+' as complete. Please review my work.')}catch(e){await sm('I completed task '+id);lt()}}
+async function dt(id){try{const j=await api.post('/api/task/'+id+'/complete',null,{silent:true});const msg=j.completion_credit?('+'+j.completion_credit+'pts — awaiting manager review'):'Task marked complete';toast(msg,'success');lt();uc();sm('I just marked task '+id+' as complete. Please review my work.')}catch(e){if(e&&e.code==='hr_portal_required'){toast(e.message||'Submit the HR portal checklist first','error');openHrPortal();return}await sm('I completed task '+id);lt()}}
 // Chat
 async function sc(){const i=document.getElementById('cin');const m=i.value.trim();if(!m)return;i.value='';await sm(m)}
 function nowt(){const d=new Date();let h=d.getHours();const m=String(d.getMinutes()).padStart(2,'0');const ap=h>=12?'PM':'AM';h=h%12||12;return h+':'+m+' '+ap}
@@ -3408,6 +3442,7 @@ window.addEventListener('DOMContentLoaded',()=>{
   registerModal('jm',cjm);
   registerModal('ivm',civm);
   registerModal('jum',cjum);
+  registerModal('hrp',closeHrPortal);
   registerModal('sd',csd);
   registerModal('jd',cjd);
   registerModal('cum',ccum);

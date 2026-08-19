@@ -361,7 +361,8 @@ HARD RULES:
 - The "tools" array MUST contain 2-5 entries appropriate for this career.
 - Each tool MUST embed at least one graded element so the user earns points by interacting with it.
 - Use UK spelling. Be realistic about deadlines and points.
-- No emojis. No markdown. JSON only."""
+- Do NOT invent HR portals, LMS links, or file attachments that the simulator cannot open. For new-starter / onboarding / payroll forms, the email body MUST include this exact markdown link: [Open HR portal](firstdesk://hr-onboarding)
+- No emojis. JSON only."""
 
 
 def _palette_for(career: str) -> str:
