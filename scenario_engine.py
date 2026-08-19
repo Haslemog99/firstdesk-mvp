@@ -361,8 +361,154 @@ HARD RULES:
 - The "tools" array MUST contain 2-5 entries appropriate for this career.
 - Each tool MUST embed at least one graded element so the user earns points by interacting with it.
 - Use UK spelling. Be realistic about deadlines and points.
-- Do NOT invent HR portals, LMS links, or file attachments that the simulator cannot open. For new-starter / onboarding / payroll forms, the email body MUST include this exact markdown link: [Open HR portal](firstdesk://hr-onboarding)
+- Do NOT invent HR portals, LMS links, file attachments, SharePoint folders, CI dashboards, or meeting URLs the simulator cannot open. Use ONLY these markdown links when the work needs a surface:
+  [Open HR portal](firstdesk://hr-onboarding) — bank details, emergency contact, right-to-work, payroll forms
+  [Open training](firstdesk://training) — LMS, handbook, policy, GDPR, HIPAA, e-learning, code of conduct
+  [Open IT setup](firstdesk://it-setup) — YubiKey, SSH keys, VPN, clone repo, 2FA, Hootsuite access
+  [Open Files](firstdesk://files) — SharePoint, shared drive, v2 folder, data room
+  [Open CI status](firstdesk://ci) — CI / pipeline status
+  [Join the meeting](firstdesk://meeting) — standups, bridges, exit meetings
+- NEVER include raw https:// URLs. Never say a PDF/draft/questionnaire is "attached" unless the work can be done in Outlook or one of the firstdesk:// surfaces above.
 - No emojis. JSON only."""
+
+
+HR_PORTAL_LINK = "[Open HR portal](firstdesk://hr-onboarding)"
+TRAINING_LINK = "[Open training](firstdesk://training)"
+IT_SETUP_LINK = "[Open IT setup](firstdesk://it-setup)"
+FILES_LINK = "[Open Files](firstdesk://files)"
+CI_LINK = "[Open CI status](firstdesk://ci)"
+MEETING_LINK = "[Join the meeting](firstdesk://meeting)"
+
+HR_PORTAL_HINTS = (
+    "hr portal", "onboarding form", "starter checklist", "right to work",
+    "right-to-work", "bank details", "emergency contact", "new starter checklist",
+    "hr onboarding", "emergency contact form", "payroll form",
+)
+TRAINING_HINTS = (
+    "e-learning", "elearning", "lms admin", "lms write", "employee handbook",
+    "read employee handbook", "security awareness training", "gdpr marketing",
+    "gdpr module", "hipaa & phi", "hipaa training", "netsuite read-write training",
+    "product analytics access training", "code of conduct", "contributing guide",
+    "social media policy", "brand book", "information security policy",
+    "procurement policy", "anti-bribery", "incident response playbook",
+    "nda and security", "sign nda", "complete security awareness",
+    "complete gdpr", "training module", "complete by lunch",
+    "complete by eod", "complete today:", "please complete:",
+    "please complete by", "onboarding tasks",
+)
+IT_SETUP_HINTS = (
+    "yubikey", "yubi key", "set up git ssh", "ssh keys", "clone the monorepo",
+    "clone repo", "vpn: configured", "hootsuite access", "2fa",
+    "generate git ssh", "dev environment",
+)
+FILES_HINTS = (
+    "sharepoint", "shared drive", "v2 folder", "data room",
+    "/docs/postmortem", "/docs/incidents", "save to sharepoint",
+    "postmortem template", "in-sim files folder", "in-sim folder",
+)
+MEETING_HINTS = (
+    "standup at", "team meeting at", "join the bridge", "exit meeting",
+    "roadmap commit meeting", "audit exit", "we have standup",
+    "we have a standup", "standup 10", "standup at 09", "standup at 10",
+    "standup at 11", "meeting at 2pm", "meeting — 14:00", "bridge:",
+)
+CI_HINTS = ("ci/cd", "ci bot", "pipeline is failing", "ci.codecraft", "runs on `main`")
+ATTACHMENT_HINTS = (
+    "pdf is attached", "draft attached", "questionnaire attached",
+    "repro steps attached", "post-mortem attached", "checklist attached",
+    "cover plan attached", "sample selections are attached",
+    "guidelines pdf is attached", "the new guidelines pdf",
+    "attached document", " is attached", "are attached",
+    "— attached", " attached.", "questionnaire — attached",
+)
+
+_MD_HTTP_RE = re.compile(r"\[([^\]]+)\]\((https?://[^\s)]+)\)", re.I)
+_BARE_HTTP_RE = re.compile(r"(?<!\()https?://[^\s)>\]]+", re.I)
+
+
+def _blob_of(*parts: str) -> str:
+    return " ".join(p or "" for p in parts).lower()
+
+
+def looks_like(blob: str, hints: tuple[str, ...]) -> bool:
+    b = (blob or "").lower()
+    return any(h in b for h in hints)
+
+
+def _append_link(body: str, needle: str, sentence: str, link: str) -> str:
+    if needle in body:
+        return body
+    return body.rstrip() + "\n\n" + sentence + " " + link
+
+
+def rewrite_in_sim_surfaces(body: str) -> str:
+    """Rewrite invented portals/URLs/attachments into working firstdesk:// links.
+
+    Used at extractor parse-time, materialise-time, and inbox serve-time so a
+    user is never sent to a dead https:// or a paperclip that does nothing.
+    """
+    if not body:
+        return body
+    text = body
+
+    def _md_http(m: re.Match) -> str:
+        label, url = m.group(1), (m.group(2) or "").lower()
+        if "ci.codecraft" in url:
+            return f"[{label}](firstdesk://ci)"
+        if "meet.shieldwall" in url or "meet." in url:
+            return f"[{label}](firstdesk://meeting)"
+        return label
+
+    text = _MD_HTTP_RE.sub(_md_http, text)
+
+    def _bare_http(m: re.Match) -> str:
+        url = (m.group(0) or "").lower()
+        if "ci.codecraft" in url:
+            return CI_LINK
+        if "meet.shieldwall" in url or "/p0-bridge" in url:
+            return MEETING_LINK
+        return ""
+
+    text = _BARE_HTTP_RE.sub(_bare_http, text)
+    text = re.sub(r"[ \t]+\n", "\n", text)
+    text = re.sub(r"\n{3,}", "\n\n", text)
+    text = re.sub(
+        r"(?:please )?attach (?:screenshots?/?logs?|files?|evidence).{0,40}?(COMP-\d+)",
+        r"add a comment with your evidence on Jira ticket \1",
+        text,
+        flags=re.I,
+    )
+    text = text.replace("/docs/postmortem.md", "the attached postmortem template")
+    text = text.replace("/docs/incidents", "the in-sim Files folder")
+
+    blob = text.lower()
+    if looks_like(blob, HR_PORTAL_HINTS):
+        text = _append_link(text, "firstdesk://hr-onboarding",
+                            "Open the new-starter checklist here:", HR_PORTAL_LINK)
+    if looks_like(blob, TRAINING_HINTS):
+        text = _append_link(text, "firstdesk://training",
+                            "Complete the required modules here:", TRAINING_LINK)
+    if looks_like(blob, IT_SETUP_HINTS):
+        text = _append_link(text, "firstdesk://it-setup",
+                            "Finish the IT setup checklist here:", IT_SETUP_LINK)
+    if looks_like(blob, FILES_HINTS):
+        text = _append_link(text, "firstdesk://files",
+                            "Save or open the in-sim folder here:", FILES_LINK)
+    if looks_like(blob, CI_HINTS):
+        text = _append_link(text, "firstdesk://ci",
+                            "Open the pipeline status here:", CI_LINK)
+    if looks_like(blob, MEETING_HINTS):
+        text = _append_link(text, "firstdesk://meeting",
+                            "Join from the meeting pill, or open it here:", MEETING_LINK)
+    ticket = re.search(r"\b(COMP-\d+)\b", text, re.I)
+    if ticket and "firstdesk://jira/" not in text:
+        tid = ticket.group(1).upper()
+        text = _append_link(
+            text, f"firstdesk://jira/{tid}",
+            "Open the ticket and add a comment with your evidence:",
+            f"[Open {tid}](firstdesk://jira/{tid})",
+        )
+    return text
 
 
 def _palette_for(career: str) -> str:
@@ -461,7 +607,7 @@ class ScenarioExtractor:
             clean_tasks.append({
                 "id": f"t_{uuid.uuid4().hex[:6]}",
                 "title": str(t.get("title") or f"Task {i+1}")[:160],
-                "description": str(t.get("description") or "")[:600],
+                "description": rewrite_in_sim_surfaces(str(t.get("description") or "")[:600]),
                 "priority": priority,
                 "deadline": str(t.get("deadline") or "17:00")[:32],
                 "status": "pending",
@@ -487,7 +633,7 @@ class ScenarioExtractor:
             clean_emails.append({
                 "from_role_key": from_role,                  # filled with real persona by Materializer
                 "subject": str(e.get("subject") or "Welcome")[:140],
-                "body": str(e.get("body") or "")[:2400],
+                "body": rewrite_in_sim_surfaces(str(e.get("body") or "")[:2400]),
                 "priority": priority,
                 "category": str(e.get("category") or "task")[:32],
                 "requires_action": bool(e.get("requires_action", True)),
@@ -606,7 +752,7 @@ class Materializer:
                 "from_email": persona["email"],
                 "to": "you",
                 "subject": e["subject"],
-                "body": e["body"],
+                "body": rewrite_in_sim_surfaces(e["body"]),
                 "time": _email_time_for(e["ord"]),
                 "read": False,
                 "replied": False,
@@ -624,7 +770,7 @@ class Materializer:
                 "id": t["id"],
                 "simulation_id": sim_id,
                 "title": t["title"],
-                "description": t["description"],
+                "description": rewrite_in_sim_surfaces(t.get("description") or ""),
                 "priority": t["priority"],
                 "deadline": t["deadline"],
                 "status": "pending",
@@ -645,7 +791,8 @@ class Materializer:
             seed_rows.append(_slack_msg(sim_id, ch, "FirstDesk Bot",
                                         f"Welcome to {ch} — daily standup at 09:30."))
         for s in template.tool_data.get("slack_seed", []):
-            seed_rows.append(_slack_msg(sim_id, s["channel"], s["from"], s["text"]))
+            seed_rows.append(_slack_msg(sim_id, s["channel"], s["from"],
+                                        rewrite_in_sim_surfaces(s["text"])))
         if seed_rows:
             self.cols.slack_col.insert_many(seed_rows)
 

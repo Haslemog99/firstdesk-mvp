@@ -62,6 +62,21 @@ from scenario_engine import (
     SeedFileSource,
     AdzunaSource,
     build_default_engine,
+    rewrite_in_sim_surfaces,
+    looks_like,
+    HR_PORTAL_HINTS,
+    TRAINING_HINTS,
+    IT_SETUP_HINTS,
+    FILES_HINTS,
+    CI_HINTS,
+    MEETING_HINTS,
+    ATTACHMENT_HINTS,
+    HR_PORTAL_LINK,
+    TRAINING_LINK,
+    IT_SETUP_LINK,
+    FILES_LINK,
+    CI_LINK,
+    MEETING_LINK,
 )
 from tool_dispatch import (
     SUPPORTED_TYPES as TOOL_SUPPORTED_TYPES,
@@ -74,6 +89,31 @@ from workplace_physics import WorkplacePhysicsEngine, WORKPLACE_PHYSICS
 
 MONGO_URI = os.environ.get("MONGO_URI", "mongodb://localhost:27017")
 FIREWORKS_KEY = os.environ.get("FIREWORKS_API_KEY", "")
+
+# LangSmith: honour LANGSMITH_* (current) or LANGCHAIN_* (legacy). Only enable
+# tracing when an API key is present so an empty .env does not spam warnings.
+def _configure_langsmith() -> bool:
+    key = (os.environ.get("LANGSMITH_API_KEY") or os.environ.get("LANGCHAIN_API_KEY") or "").strip()
+    project = (
+        os.environ.get("LANGSMITH_PROJECT")
+        or os.environ.get("LANGCHAIN_PROJECT")
+        or "Firstdesk"
+    ).strip() or "Firstdesk"
+    if not key:
+        os.environ.setdefault("LANGSMITH_TRACING", "false")
+        os.environ.setdefault("LANGCHAIN_TRACING_V2", "false")
+        log.info("langsmith.tracing disabled (no LANGSMITH_API_KEY)")
+        return False
+    os.environ["LANGSMITH_API_KEY"] = key
+    os.environ["LANGCHAIN_API_KEY"] = key
+    os.environ["LANGSMITH_TRACING"] = "true"
+    os.environ["LANGCHAIN_TRACING_V2"] = "true"
+    os.environ["LANGSMITH_PROJECT"] = project
+    os.environ["LANGCHAIN_PROJECT"] = project
+    log.info("langsmith.tracing enabled project=%s", project)
+    return True
+
+LANGSMITH_ENABLED = _configure_langsmith()
 
 # Startup env-var validation. STRICT_ENV=1 fails fast in production.
 _REQUIRED_ENV = ("MONGO_URI", "FIREWORKS_API_KEY")
@@ -118,6 +158,10 @@ slack_col = db["slack_messages"]
 tools_col = db["tools"]
 # New-starter HR checklist (bank / emergency / right-to-work). One doc per sim.
 hr_onboarding_col = db["hr_onboarding"]
+# In-sim stubs: training/LMS checklist, IT setup checklist, SharePoint/files saves.
+training_col = db["training"]
+it_setup_col = db["it_setup"]
+files_col = db["files"]
 # Interview Practice — standalone or post-simulation. One doc per attempt.
 interviews_col = db["interviews"]
 # Analytics — append-only event log (user_registered, simulation_started, etc.).
@@ -143,7 +187,8 @@ def _ensure_bootstrap():
         for _c in (emails_col, tasks_col, evals_col, siem_col, jira_col,
                    campaigns_col, invoices_col, slack_col, tools_col,
                    reputation_col, agent_comms_col, system_events_col,
-                   sheets_col, interviews_col, user_scenarios_col, grc_col):
+                   sheets_col, interviews_col, user_scenarios_col, grc_col,
+                   hr_onboarding_col, training_col, it_setup_col, files_col):
             try: _c.create_index("simulation_id")
             except Exception: pass
         try:
@@ -189,6 +234,21 @@ def sim_id() -> str: return _sim_id_var.get()
 def session_id() -> str: return _session_id_var.get()
 def get_career() -> Optional[str]: return _career_var.get()
 def user_id() -> Optional[str]: return _user_id_var.get()
+
+def _ls_config(run_name: str) -> dict:
+    """LangSmith run tags + metadata. Safe to pass even when tracing is off."""
+    career = get_career() or "none"
+    return {
+        "run_name": f"firstdesk:{run_name}",
+        "tags": ["firstdesk", run_name, career],
+        "metadata": {
+            "simulation_id": sim_id(),
+            "session_id": session_id(),
+            "user_id": user_id() or "",
+            "career": career,
+            "app_version": os.environ.get("APP_VERSION", "0.1.0"),
+        },
+    }
 
 def set_scope(user_id_val: str, career: Optional[str] = ...) -> None:
     """Set per-request scope. Called by auth middleware once per request."""
@@ -549,45 +609,358 @@ CAREER_CONFIGS = {
 # ══════════════════════════════════════════
 
 def clear_sim():
-    for c in [emails_col, tasks_col, sheets_col, invoices_col, evals_col, memory_col, actions_col, agent_comms_col, system_events_col, siem_col, jira_col, campaigns_col, slack_col, tools_col, hr_onboarding_col]:
+    for c in [emails_col, tasks_col, sheets_col, invoices_col, evals_col, memory_col, actions_col, agent_comms_col, system_events_col, siem_col, jira_col, campaigns_col, slack_col, tools_col, hr_onboarding_col, training_col, it_setup_col, files_col]:
         c.delete_many({"simulation_id": sim_id()})
     reputation_col.delete_many({"simulation_id": sim_id()})
 
 
-HR_PORTAL_LINK = "[Open HR portal](firstdesk://hr-onboarding)"
-_HR_PORTAL_HINTS = (
-    "hr portal", "onboarding form", "starter checklist", "right to work",
-    "right-to-work", "bank details", "emergency contact", "attached document",
-    "new starter checklist",
-)
-
-
 def _looks_like_hr_portal_text(*parts: str) -> bool:
-    blob = " ".join(p or "" for p in parts).lower()
-    return any(h in blob for h in _HR_PORTAL_HINTS)
+    return looks_like(" ".join(p or "" for p in parts), HR_PORTAL_HINTS)
 
 
 def _ensure_hr_portal_link(body: str) -> str:
-    """Scenario emails often invent a portal/attachment that does not exist.
-    Rewrite those bodies so the in-sim HR checklist is actually clickable."""
-    if not body:
-        return body
-    if "firstdesk://hr-onboarding" in body:
-        return body
-    if not _looks_like_hr_portal_text(body):
-        return body
-    return body.rstrip() + "\n\nOpen the new-starter checklist here: " + HR_PORTAL_LINK
+    """Back-compat wrapper. Prefer rewrite_in_sim_surfaces for new call sites."""
+    return rewrite_in_sim_surfaces(body)
+
+
+def _task_blob(t: dict) -> str:
+    steps = " ".join((s.get("action") or "") for s in (t.get("tool_workflow") or []))
+    return " ".join([t.get("title", "") or "", t.get("description", "") or "", steps]).lower()
 
 
 def _is_onboarding_forms_task(t: dict) -> bool:
-    steps = " ".join((s.get("action") or "") for s in (t.get("tool_workflow") or []))
-    return _looks_like_hr_portal_text(t.get("title", ""), t.get("description", ""), steps)
+    return looks_like(_task_blob(t), HR_PORTAL_HINTS)
 
 
 def _hr_onboarding_submitted() -> Optional[dict]:
     return hr_onboarding_col.find_one(
         {"simulation_id": sim_id(), "submitted": True}, {"_id": 0}
     )
+
+
+def _training_submitted() -> Optional[dict]:
+    return training_col.find_one(
+        {"simulation_id": sim_id(), "submitted": True}, {"_id": 0}
+    )
+
+
+def _it_setup_submitted() -> Optional[dict]:
+    return it_setup_col.find_one(
+        {"simulation_id": sim_id(), "submitted": True}, {"_id": 0}
+    )
+
+
+def _files_saved() -> list[dict]:
+    return list(files_col.find({"simulation_id": sim_id()}, {"_id": 0}))
+
+
+def _comp014_has_evidence() -> bool:
+    t = jira_col.find_one({"id": "COMP-014", "simulation_id": sim_id()}, {"_id": 0})
+    if not t:
+        return False
+    return any(
+        (c.get("author") == "you") and str(c.get("text") or "").strip()
+        for c in (t.get("comments") or [])
+    )
+
+
+def _attachments_viewed() -> list[str]:
+    s = sessions_col.find_one({"session_id": session_id()}, {"attachments_viewed": 1}) or {}
+    return list(s.get("attachments_viewed") or [])
+
+
+_TRAINING_MODULES: dict[str, list[dict]] = {
+    "accountant": [
+        {"id": "handbook", "title": "Employee handbook"},
+        {"id": "it_policy", "title": "IT acceptable use policy"},
+        {"id": "email_sig", "title": "Email signature setup"},
+    ],
+    "cybersecurity": [
+        {"id": "nda", "title": "NDA and security clearance"},
+        {"id": "playbook", "title": "Incident response playbook"},
+        {"id": "awareness", "title": "Security awareness training"},
+    ],
+    "marketing": [
+        {"id": "social_policy", "title": "Social media policy"},
+        {"id": "brand_book", "title": "Brand book"},
+        {"id": "gdpr", "title": "GDPR marketing training"},
+    ],
+    "developer": [
+        {"id": "contributing", "title": "Contributing guide"},
+        {"id": "coc", "title": "Code of conduct acknowledgement"},
+    ],
+    "procurement": [
+        {"id": "netsuite", "title": "NetSuite read-write e-learning"},
+        {"id": "proc_policy", "title": "Procurement policy acknowledgement"},
+        {"id": "bribery", "title": "Anti-bribery & gifts register"},
+        {"id": "sod", "title": "SoD (segregation of duties) declaration"},
+    ],
+    "hr": [
+        {"id": "lms_admin", "title": "LMS admin training"},
+        {"id": "gdpr", "title": "Data handling for L&D records — GDPR"},
+        {"id": "sod", "title": "SoD declaration for LMS write access"},
+        {"id": "coc", "title": "Code of conduct + confidentiality"},
+    ],
+    "pm": [
+        {"id": "analytics", "title": "Product analytics access training"},
+        {"id": "gdpr", "title": "Customer data & GDPR"},
+        {"id": "roadmap", "title": "Roadmap-tool admin training"},
+        {"id": "coc", "title": "Code of conduct + customer-promise policy"},
+    ],
+    "grc": [
+        {"id": "hipaa", "title": "HIPAA & PHI handling training"},
+        {"id": "infosec", "title": "Information Security policy acknowledgement"},
+        {"id": "grc_tools", "title": "GRC tooling training (register + controls)"},
+        {"id": "coc", "title": "Code of conduct + confidentiality"},
+    ],
+}
+
+_IT_SETUP_ITEMS: dict[str, list[dict]] = {
+    "cybersecurity": [
+        {"id": "yubikey", "title": "Register YubiKey for 2FA"},
+        {"id": "vpn", "title": "Confirm VPN profile"},
+    ],
+    "developer": [
+        {"id": "ssh", "title": "Acknowledge Git SSH key setup"},
+        {"id": "clone", "title": "Confirm repo access (no clone required)"},
+    ],
+    "marketing": [
+        {"id": "hootsuite", "title": "Confirm Hootsuite access"},
+    ],
+}
+
+_DEFAULT_FILE_FOLDERS: dict[str, str] = {
+    "accountant": "SharePoint/Audit/2026/Q1",
+    "marketing": "Marketing/Shared/v2",
+    "developer": "Engineering/docs",
+    "cybersecurity": "SOC/Evidence",
+    "procurement": "Procurement/Shared",
+    "hr": "People/L&D",
+    "pm": "Product/Shared",
+    "grc": "GRC/Audit/2026",
+}
+
+_ATTACHMENTS_BY_ID: dict[str, list[dict]] = {
+    "acc-d5-e3": [{
+        "title": "BDO pre-audit checklist.pdf",
+        "body": (
+            "BDO — Apex Financial pre-audit checklist (on-site Monday 09:00)\n\n"
+            "1. Signed bank recs (March + April)\n"
+            "2. Fixed-asset register — additions and disposals YTD\n"
+            "3. Intercompany schedule with Apex Ireland\n"
+            "4. Top-20 accruals with backup\n"
+            "5. Revenue recognition memo (Q1 SaaS deals)\n\n"
+            "Confirm each item is in the data room by EOD today."
+        ),
+    }],
+    "dev-d3-e1": [{
+        "title": "Acme — cart > 20 repro steps.txt",
+        "body": (
+            "Repro (Acme Corp, production, Chrome 124)\n"
+            "1. Sign in as acme-admin@example.com\n"
+            "2. Add 21 distinct SKUs to cart (fails at item 21, not 20)\n"
+            "3. Click Checkout\n"
+            "4. Observed: 500 CART_OVERFLOW from /api/checkout, spinner hangs\n"
+            "Expected: checkout proceeds. Stop-gap: cap UI at 20 until fix ships."
+        ),
+    }],
+    "hr-d3-e2": [{
+        "title": "Learn Platform — auto-grader post-mortem.md",
+        "body": (
+            "# Post-mortem — auto-grader rejecting all Module 3 submissions\n\n"
+            "## Timeline\n- 13:40 cohort reports all submissions fail\n"
+            "- 14:00 vendor patched regex parser (lookahead overflow on nested JSX)\n\n"
+            "## Root cause\nBug in vendor regex parser, not Helix config.\n\n"
+            "## Remedy\n2 weeks free credit (£1,820). Apply to next invoice."
+        ),
+    }],
+    "pm-d3-e1": [{
+        "title": "Kai Tanaka — parental leave cover plan.md",
+        "body": (
+            "Cover from Monday, 8 weeks. Unreachable except P0.\n\n"
+            "• Adam Foley — RM-502 (checkout flow)\n"
+            "• Mei Chang — platform stability\n\n"
+            "Do not surface Kai on the org-chart slide or congratulate in standup."
+        ),
+    }],
+    "grc-d2-e1": [{
+        "title": "Ashcroft — Day 1 sample selections.pdf",
+        "body": (
+            "Fieldwork Day 1 sample selections\n\n"
+            "CC6.3 access reviews — sample of 25 accounts.\n"
+            "Evidence provided: December 2024 review (OUT OF PERIOD).\n"
+            "Q1 2026 review: not run. Exception unless in-period review is produced this week.\n\n"
+            "Also sampling CC6.1 MFA (12 admin accounts) and CC9.2 vendor BAAs."
+        ),
+    }],
+}
+
+_ATTACHMENTS_BY_SUBJECT: tuple[tuple[str, dict], ...] = (
+    ("updated brand guidelines", {
+        "title": "NovaTech brand guidelines v2.pdf",
+        "body": (
+            "NovaTech Brand Guidelines v2 — use immediately\n\n"
+            "Primary: Deep Teal (#0D9488) — replaces Navy\n"
+            "Secondary: Amber (#F59E0B)\n"
+            "Tone: bold and innovative (was professional and approachable)\n\n"
+            "Do not pull from the old shared-drive folder. Use the v2 assets."
+        ),
+    }),
+    ("security questionnaire for the mercy health", {
+        "title": "Mercy Health — security questionnaire (Tom's draft).docx",
+        "body": (
+            "Mercy Health security questionnaire — Tom pre-filled YES on everything. Do not rubber-stamp.\n\n"
+            "1. Fully HIPAA compliant?  [Tom: Yes]  — actual: HIPAA programme in progress; BAA gap on Lumina\n"
+            "2. SOC 2 certified?  [Tom: Yes]  — actual: SOC 2 Type II IN PROGRESS, not certified\n"
+            "3. All data encrypted?  [Tom: Yes]  — actual: encrypted at rest and in transit\n"
+            "4. Annual pen tests?  [Tom: Yes]  — confirm last test date before signing\n"
+            "5. 24/7 SOC?  [Tom: Yes]  — confirm coverage hours\n\n"
+            "Overstating posture in a signed questionnaire is misrepresentation."
+        ),
+    }),
+    ("notification opt-out leak", {
+        "title": "RM-504 apology email — draft.txt",
+        "body": (
+            "Draft apology (for Privacy sign-off)\n\n"
+            "Subject: Correction — an activity notification you opted out of\n\n"
+            "We emailed ~3,200 users who had opted out of activity notifications "
+            "('your teammate just shared a doc'). The opt-out check ran in-template "
+            "instead of before the mailer. We have patched the send path and will "
+            "not contact you about activity unless you re-subscribe.\n\n"
+            "Approve or tighten this copy, then reply to Mei + Privacy."
+        ),
+    }),
+    ("postmortem template", {
+        "title": "postmortem.md",
+        "body": (
+            "# Incident postmortem\n\n"
+            "## Timeline\n\n## Root cause (5-whys)\n\n"
+            "## What worked\n\n## What didn't\n\n"
+            "## Action items (owner + due date)\n"
+        ),
+    }),
+)
+
+
+def _generic_attachment(email: dict) -> dict:
+    subj = email.get("subject") or "Attachment"
+    return {
+        "id": f"att-{email.get('id')}",
+        "title": f"{subj} — attachment",
+        "body": f"(In-sim attachment for: {subj})\n\n" + (email.get("body") or "")[:1200],
+    }
+
+
+def _attachments_for_email(email: dict) -> list[dict]:
+    if email.get("attachments"):
+        out = []
+        for i, a in enumerate(email["attachments"]):
+            att = dict(a)
+            att.setdefault("id", f"att-{email.get('id')}-{i}")
+            out.append(att)
+        return out
+    eid = email.get("id") or ""
+    if eid in _ATTACHMENTS_BY_ID:
+        return [
+            {**a, "id": a.get("id") or f"att-{eid}-{i}"}
+            for i, a in enumerate(_ATTACHMENTS_BY_ID[eid])
+        ]
+    subj = (email.get("subject") or "").lower()
+    for needle, att in _ATTACHMENTS_BY_SUBJECT:
+        if needle in subj:
+            return [{**att, "id": f"att-{eid}-0"}]
+    blob = ((email.get("body") or "") + " " + subj).lower()
+    if looks_like(blob, ATTACHMENT_HINTS):
+        return [_generic_attachment(email)]
+    return []
+
+
+def _hydrate_email_surfaces(email: dict) -> dict:
+    """Serve-time: working firstdesk:// links + real attachment payloads."""
+    e = dict(email)
+    if e.get("body"):
+        e["body"] = rewrite_in_sim_surfaces(e["body"])
+    atts = _attachments_for_email(e)
+    if atts:
+        e["attachments"] = atts
+        if not email.get("attachments") and e.get("id"):
+            try:
+                emails_col.update_one(
+                    {"id": e["id"], "simulation_id": sim_id()},
+                    {"$set": {"attachments": atts}},
+                )
+            except Exception:
+                pass
+    return e
+
+
+def _needs_training(t: dict) -> bool:
+    b = _task_blob(t)
+    if looks_like(b, TRAINING_HINTS):
+        return True
+    return "onboarding" in b
+
+
+def _needs_it_setup(t: dict) -> bool:
+    b = _task_blob(t)
+    hardware = any(w in b for w in ("yubikey", "ssh key", "ssh keys", "clone repo", "clone the", "vpn", "2fa"))
+    if hardware:
+        return True
+    return "onboarding" in b and any(w in b for w in ("hootsuite", "yubikey", "ssh", "clone", "vpn"))
+
+
+def _needs_files(t: dict) -> bool:
+    b = _task_blob(t)
+    return looks_like(b, FILES_HINTS) or "sharepoint" in b or "shared drive" in b or "data room" in b
+
+
+def _needs_comp014(t: dict) -> bool:
+    b = _task_blob(t)
+    return "comp-014" in b or "iso 27001 evidence" in b
+
+
+def _needs_attachment(t: dict) -> bool:
+    b = _task_blob(t)
+    return any(w in b for w in (
+        "questionnaire", "repro steps", "apology", "pre-audit checklist",
+        "sample selection", "bdo data-room", "confirm bdo",
+    ))
+
+
+def _task_complete_block(t: dict) -> Optional[tuple[str, str]]:
+    """Block Complete when the matching in-sim evidence does not exist yet."""
+    career = get_career() or ""
+    if _is_onboarding_forms_task(t) and not _hr_onboarding_submitted():
+        return (
+            "hr_portal_required",
+            "Open the HR portal from the onboarding email and submit the checklist before marking this done.",
+        )
+    if _needs_training(t) and _TRAINING_MODULES.get(career) and not _training_submitted():
+        return (
+            "training_required",
+            "Open Training from the onboarding email and mark the required modules complete first.",
+        )
+    if _needs_it_setup(t) and _IT_SETUP_ITEMS.get(career) and not _it_setup_submitted():
+        return (
+            "it_setup_required",
+            "Open IT setup from the onboarding email and complete the checklist first.",
+        )
+    if _needs_files(t) and not _files_saved():
+        return (
+            "files_required",
+            "Save the file to the in-sim folder (Open Files from the email) before marking this done.",
+        )
+    if _needs_comp014(t) and not _comp014_has_evidence():
+        return (
+            "jira_evidence_required",
+            "Add a comment with your evidence on Jira ticket COMP-014 before marking this done.",
+        )
+    if _needs_attachment(t) and not _attachments_viewed():
+        return (
+            "attachment_required",
+            "Open the in-sim attachment on the related email first — the paperclip is the evidence.",
+        )
+    return None
 
 def _seed_accountant_artifacts(cfg):
     """Career-specific Sage data (spreadsheets, invoices, system events).
@@ -1167,7 +1540,7 @@ def seed_cybersecurity(cfg):
         {"id":"e5","simulation_id":sim_id(),"from_name":cfg["manager"]["name"],"from_role":cfg["manager"]["role"],"from_email":cfg["manager"]["email"],"to":"you","subject":"Phishing campaign detected","body":"Heads up — we've seen a phishing campaign targeting our employees. Subject line: 'Urgent: Password Reset Required'. If you see it in the SIEM logs, flag it immediately. Do NOT click any links.\n\nAlso check if any employees clicked — we need a click-through report by 3pm.\n\nAlex","time":"09:15","read":False,"replied":False,"priority":"high","category":"task","requires_action":True},
         {"id":"e6","simulation_id":sim_id(),"from_name":cfg["teammate"]["name"],"from_role":cfg["teammate"]["role"],"from_email":cfg["teammate"]["email"],"to":"you","subject":"IOCs from last month's similar incident","body":f"Hi,\n\nThe DataFlow exfil pattern looks like the one we worked in March — same destination ASN. I'm pasting the IOCs below. If they match, escalate immediately and don't waste time re-baselining:\n\n• 185.234.72.0/24 — known data-staging infra\n• User-Agent: 'curl/7.64.0' on outbound HTTPS = automated\n• 2-4am window matches their pattern\n\nDocument anything new you find — we maintain the playbook.\n\n{cfg['teammate']['name'].split()[0]}","time":"09:45","read":False,"replied":False,"priority":"medium","category":"teammate","requires_action":False},
         {"id":"e7","simulation_id":sim_id(),"from_name":cfg["director"]["name"],"from_role":cfg["director"]["role"],"from_email":cfg["director"]["email"],"to":"soc@shieldwall.io","subject":"Weekly threat report — due Friday","body":f"All,\n\nThis week's threat report needs:\n1. Top 5 alerts by severity\n2. Phishing campaign summary (employee click-rate)\n3. Open incidents and ETA\n4. New IOCs added to the watchlist\n\nNew starters — get involved. Submit your section to {cfg['manager']['name'].split()[0]} by Thursday EOD.\n\n{cfg['director']['name']}","time":"10:45","read":False,"replied":False,"priority":"high","category":"info","requires_action":False},
-        {"id":"e8","simulation_id":sim_id(),"from_name":"Compliance Bot","from_role":"GRC","from_email":"grc@shieldwall.io","to":"you","subject":"ISO 27001 evidence required — 3 controls","body":"Hi,\n\nQuarterly compliance review. We need evidence for the following controls — please attach screenshots/logs in Jira ticket COMP-014:\n\n• A.12.4.1 — Event logging (last 30 days)\n• A.16.1.5 — Response to incidents\n• A.13.1.1 — Network controls\n\nDeadline: Friday 17:00. No exceptions — auditors arrive Monday.\n\nGRC","time":"11:00","read":False,"replied":False,"priority":"medium","category":"task","requires_action":True},
+        {"id":"e8","simulation_id":sim_id(),"from_name":"Compliance Bot","from_role":"GRC","from_email":"grc@shieldwall.io","to":"you","subject":"ISO 27001 evidence required — 3 controls","body":"Hi,\n\nQuarterly compliance review. We need evidence for the following controls — add a comment with your evidence on Jira ticket COMP-014 — [Open COMP-014](firstdesk://jira/COMP-014):\n\n• A.12.4.1 — Event logging (last 30 days)\n• A.16.1.5 — Response to incidents\n• A.13.1.1 — Network controls\n\nDeadline: Friday 17:00. No exceptions — auditors arrive Monday.\n\nGRC","time":"11:00","read":False,"replied":False,"priority":"medium","category":"task","requires_action":True},
     ])
     tasks_col.insert_many([
         {"id":"t1","simulation_id":sim_id(),"title":"Complete security onboarding","description":"NDA, YubiKey, playbook review, security training","priority":"medium","deadline":"12:00","status":"pending","points":10},
@@ -1309,6 +1682,38 @@ def seed_cybersecurity(cfg):
         for a in _generate_noise_alerts(1, _NOISE_PER_DAY[1], _noise_seed(_sim, 1))
     ])
     _seed_cybersecurity_siem_only()
+    _seed_comp014()
+
+
+def _seed_comp014():
+    """ISO 27001 evidence ticket referenced by cyber e8/t8. Idempotent."""
+    _sim = sim_id()
+    if jira_col.find_one({"id": "COMP-014", "simulation_id": _sim}, {"_id": 1}):
+        return
+    jira_col.insert_one({
+        "id": "COMP-014",
+        "simulation_id": _sim,
+        "type": "compliance",
+        "title": "ISO 27001 quarterly evidence — A.12.4.1 / A.16.1.5 / A.13.1.1",
+        "priority": "HIGH",
+        "status": "open",
+        "assignee": "you",
+        "reporter": "GRC",
+        "component": "compliance",
+        "description": (
+            "Quarterly compliance review. Add a COMMENT with your evidence for:\n"
+            "• A.12.4.1 — Event logging (last 30 days)\n"
+            "• A.16.1.5 — Response to incidents\n"
+            "• A.13.1.1 — Network controls\n"
+            "Deadline Friday 17:00. A comment is the evidence path — no file upload."
+        ),
+        "comments": [
+            {"author": "GRC", "ts": "2026-02-18T11:00:00Z",
+             "text": "Please add a comment with your evidence notes. Screenshots in the comment body are fine."},
+        ],
+        "created_at": "2026-02-18T11:00:00Z",
+        "updated_at": "2026-02-18T11:00:00Z",
+    })
 
 def _seed_cybersecurity_siem_only():
     """Idempotent: clears prior day-1 SIEM alerts + system events for this sim,
@@ -1335,6 +1740,7 @@ def _seed_cybersecurity_artifacts(cfg):
     the SIEM tab is still empty. Re-run the full cyber seed (delete first to avoid
     duplicate emails/tasks the engine already inserted is NOT done — we only want
     the SIEM data which the engine never touches)."""
+    _seed_comp014()
     _sim = sim_id()
     if siem_col.find_one({"simulation_id": _sim}, {"_id": 1}):
         return  # Already populated — nothing to do.
@@ -1454,7 +1860,7 @@ _DAY_PACKS: dict[str, dict[int, dict]] = {
                 {"id":"acc-d3-e2","from_name":"Sarah Mitchell","from_role":"Finance Manager","from_email":"sarah@apexfinancial.com","subject":"Quick win — supplier statement reconciliations","body":"Found 3 supplier statements with mismatches against our ledger:\n• Pinewood Supplies — £840 difference (their favour)\n• CloudHost Ltd — £120 in our favour\n• Premier Couriers — £56 our favour\n\nReconcile by EOD and send me a summary. Easy points if you spot which one is a duplicate posting on our side.\n\nSarah","time":"10:00","read":False,"replied":False,"priority":"medium","category":"task","requires_action":True},
             ],
             "tasks": [
-                {"id":"acc-d3-t1","title":"Pull audit pack — March/April bank rec","description":"Two signed bank recs for BDO. Save to SharePoint/Audit/2026/Q1.","priority":"high","deadline":"Friday 17:00","status":"pending","points":20},
+                {"id":"acc-d3-t1","title":"Pull audit pack — March/April bank rec","description":"Two signed bank recs for BDO. Save to SharePoint/Audit/2026/Q1 via [Open Files](firstdesk://files).","priority":"high","deadline":"Friday 17:00","status":"pending","points":20},
                 {"id":"acc-d3-t2","title":"Intercompany match — Apex Ireland","description":"Reconcile £127k IC balance. Find the offset for the £4,200 Q1 management fee.","priority":"high","deadline":"Friday 17:00","status":"pending","points":18},
                 {"id":"acc-d3-t3","title":"Resolve 3 supplier statement diffs","description":"Pinewood/CloudHost/Premier — see Sarah's note.","priority":"medium","deadline":"17:00","status":"pending","points":12},
             ],
@@ -1567,7 +1973,7 @@ _DAY_PACKS: dict[str, dict[int, dict]] = {
         },
         3: {
             "emails": [
-                {"id":"cyb-d3-e1","from_name":"Alex Kim","from_role":"CISO","from_email":"alex@shieldwall.io","subject":"P0 incident — ransomware on FILE-SRV-02","body":"Wake up. Active ransomware on the finance share. Join the bridge: https://meet.shieldwall.io/p0-bridge\n\nYour ONE job for the next 4 hours: triage all incoming alerts. If anything looks related to FILE-SRV-02 or FIN-LAPTOP-12, ESCALATE — don't resolve.\n\nAlex","time":"02:00","read":False,"replied":False,"priority":"high","category":"info","requires_action":True},
+                {"id":"cyb-d3-e1","from_name":"Alex Kim","from_role":"CISO","from_email":"alex@shieldwall.io","subject":"P0 incident — ransomware on FILE-SRV-02","body":"Wake up. Active ransomware on the finance share. Join the bridge: [Join the meeting](firstdesk://meeting)\n\nYour ONE job for the next 4 hours: triage all incoming alerts. If anything looks related to FILE-SRV-02 or FIN-LAPTOP-12, ESCALATE — don't resolve.\n\nAlex","time":"02:00","read":False,"replied":False,"priority":"high","category":"info","requires_action":True},
                 {"id":"cyb-d3-e2","from_name":"Priya Iyer","from_role":"SOC Lead","from_email":"priya@shieldwall.io","subject":"Phishing wave — pull all 142 inboxes","body":"Coordinate with Email Admin (Jordan) to purge the sh1eldwall.io phishing wave from all 142 mailboxes. I need confirmation count back by 11:00.\n\nPriya","time":"08:30","read":False,"replied":False,"priority":"high","category":"task","requires_action":True},
             ],
             "tasks": [
@@ -1602,11 +2008,11 @@ _DAY_PACKS: dict[str, dict[int, dict]] = {
     "developer": {
         2: {
             "emails": [
-                {"id":"dev-d2-e1","from_name":"Jess Romero","from_role":"Engineering Manager","from_email":"jess@codecraft.dev","subject":"Hotfix landed — let's not break checkout again","body":"PR-3412 is in prod. Two follow-ups:\n1. Write a postmortem (template in /docs/incidents)\n2. Add a regression test that would have caught BUG-301 before merge\n\nDon't rush either — I'd rather lose a day than ship the same bug twice.\n\nJess","time":"08:30","read":False,"replied":False,"priority":"high","category":"task","requires_action":True},
+                {"id":"dev-d2-e1","from_name":"Jess Romero","from_role":"Engineering Manager","from_email":"jess@codecraft.dev","subject":"Hotfix landed — let's not break checkout again","body":"PR-3412 is in prod. Two follow-ups:\n1. Write a postmortem (template in Files: [Open Files](firstdesk://files))\n2. Add a regression test that would have caught BUG-301 before merge\n\nDon't rush either — I'd rather lose a day than ship the same bug twice.\n\nJess","time":"08:30","read":False,"replied":False,"priority":"high","category":"task","requires_action":True},
                 {"id":"dev-d2-e2","from_name":"Sam Patel","from_role":"Senior Dev","from_email":"sam@codecraft.dev","subject":"BUG-303 — saw your PR, two nits","body":"Looks good overall. Two nits in review:\n• Line 47 — that null check shouldn't be needed because the type guarantees non-null. Remove it.\n• Tests don't cover the discount-stacking case. Add one.\n\nLand by EOD and I'll approve.\n\nSam","time":"10:00","read":False,"replied":False,"priority":"medium","category":"teammate","requires_action":True},
             ],
             "tasks": [
-                {"id":"dev-d2-t1","title":"Write checkout postmortem","description":"Template /docs/incidents. Root cause, timeline, action items.","priority":"high","deadline":"17:00","status":"pending","points":18},
+                {"id":"dev-d2-t1","title":"Write checkout postmortem","description":"Use the in-sim Files folder. Root cause, timeline, action items.","priority":"high","deadline":"17:00","status":"pending","points":18},
                 {"id":"dev-d2-t2","title":"Regression test for BUG-301","description":"Pre-merge gate. Should fail on the original buggy code.","priority":"high","deadline":"17:00","status":"pending","points":15},
                 {"id":"dev-d2-t3","title":"Address Sam's PR review on BUG-303","description":"Drop null check, add discount-stacking test.","priority":"medium","deadline":"17:00","status":"pending","points":10},
             ],
@@ -1936,12 +2342,12 @@ def _seed_marketing_artifacts(cfg):
 
 def seed_marketing(cfg):
     emails_col.insert_many([
-        {"id":"e1","simulation_id":sim_id(),"from_name":cfg["manager"]["name"],"from_role":cfg["manager"]["role"],"from_email":cfg["manager"]["email"],"to":"you","subject":"Welcome! Product launch campaign briefing","body":f"Welcome to {cfg['company']}! We're launching NovaTech's new product next week. I need you to:\n\n1. Draft 3 social media posts (LinkedIn, Twitter, Instagram)\n2. Review the content calendar for next week\n3. Prepare the email newsletter draft\n\nThe brand guidelines are in the shared drive. NovaTech is very particular about their tone — professional but approachable.\n\nDeadline: social posts by 3pm today, newsletter draft by tomorrow.\n\n{cfg['manager']['name']}","time":"09:00","read":False,"replied":False,"priority":"high","category":"task","requires_action":True},
+        {"id":"e1","simulation_id":sim_id(),"from_name":cfg["manager"]["name"],"from_role":cfg["manager"]["role"],"from_email":cfg["manager"]["email"],"to":"you","subject":"Welcome! Product launch campaign briefing","body":f"Welcome to {cfg['company']}! We're launching NovaTech's new product next week. I need you to:\n\n1. Draft 3 social media posts (LinkedIn, Twitter, Instagram)\n2. Review the content calendar for next week\n3. Prepare the email newsletter draft\n\nThe brand guidelines are in Files: [Open Files](firstdesk://files). NovaTech is very particular about their tone — professional but approachable.\n\nDeadline: social posts by 3pm today, newsletter draft by tomorrow.\n\n{cfg['manager']['name']}","time":"09:00","read":False,"replied":False,"priority":"high","category":"task","requires_action":True},
         {"id":"e2","simulation_id":sim_id(),"from_name":cfg["client"]["name"],"from_role":cfg["client"]["role"],"from_email":cfg["client"]["email"],"to":"marketing@brightpath.co","subject":"UPDATED brand guidelines — please use new colours","body":"Hi team,\n\nWe've just updated our brand guidelines. The primary colour is now Deep Teal (#0D9488) instead of Navy. Please update all campaign materials accordingly. The new guidelines PDF is attached.\n\nAlso, we've decided the tone should be more 'bold and innovative' rather than 'professional and approachable'. Sorry for the late change.\n\nThanks,\nNovaTech Marketing","time":"10:00","read":False,"replied":False,"priority":"high","category":"client","requires_action":True},
         {"id":"e3","simulation_id":sim_id(),"from_name":"HR Team","from_role":"HR","from_email":"hr@brightpath.co","to":"you","subject":"Onboarding tasks","body":"Welcome! Please complete:\n1. Read social media policy\n2. Set up Hootsuite access\n3. Review brand book\n4. Complete GDPR marketing training\n\nEmployee ID: BP-0392","time":"08:45","read":False,"replied":False,"priority":"medium","category":"onboarding","requires_action":True},
         {"id":"e4","simulation_id":sim_id(),"from_name":cfg["it"]["name"],"from_role":cfg["it"]["role"],"from_email":cfg["it"]["email"],"to":"you","subject":"Tool access ready","body":f"Hi, your accounts:\n- Hootsuite: configured\n- Canva Pro: team access\n- Google Analytics: viewer\n- Slack: #marketing channel\n\n{cfg['it']['name']}","time":"08:30","read":False,"replied":False,"priority":"low","category":"info","requires_action":False},
-        {"id":"e5","simulation_id":sim_id(),"from_name":cfg["manager"]["name"],"from_role":cfg["manager"]["role"],"from_email":cfg["manager"]["email"],"to":"you","subject":"Analytics report needed","body":"Oh also — can you pull the engagement metrics from last month's campaign? Lisa (the CEO) wants to see the ROI numbers in tomorrow's board meeting.\n\nThe data is in Google Analytics and Hootsuite. Template is in the shared drive.\n\nLisa","time":"10:30","read":False,"replied":False,"priority":"medium","category":"task","requires_action":True},
-        {"id":"e6","simulation_id":sim_id(),"from_name":cfg["teammate"]["name"],"from_role":cfg["teammate"]["role"],"from_email":cfg["teammate"]["email"],"to":"you","subject":"Sharing brand v2 assets — use these","body":f"Welcome!\n\nHeads up — we got the new NovaTech v2 logo lockup and colour swatches yesterday. Don't pull from the old shared drive folder, half of it's the navy version. Use the v2 folder. The teal is #0D9488, secondary is #F59E0B.\n\nIf you draft posts, ping me and I'll review before they go live. Faster than learning by getting the client annoyed at us.\n\n{cfg['teammate']['name'].split()[0]}","time":"09:45","read":False,"replied":False,"priority":"medium","category":"teammate","requires_action":False},
+        {"id":"e5","simulation_id":sim_id(),"from_name":cfg["manager"]["name"],"from_role":cfg["manager"]["role"],"from_email":cfg["manager"]["email"],"to":"you","subject":"Analytics report needed","body":"Oh also — can you pull the engagement metrics from last month's campaign? Lisa (the CEO) wants to see the ROI numbers in tomorrow's board meeting.\n\nUse the Campaigns tool (reach / CTR / last month's calendar). Template is in Files: [Open Files](firstdesk://files).\n\nLisa","time":"10:30","read":False,"replied":False,"priority":"medium","category":"task","requires_action":True},
+        {"id":"e6","simulation_id":sim_id(),"from_name":cfg["teammate"]["name"],"from_role":cfg["teammate"]["role"],"from_email":cfg["teammate"]["email"],"to":"you","subject":"Sharing brand v2 assets — use these","body":f"Welcome!\n\nHeads up — we got the new NovaTech v2 logo lockup and colour swatches yesterday. Don't pull from the old folder, half of it's the navy version. Use the v2 folder: [Open Files](firstdesk://files). The teal is #0D9488, secondary is #F59E0B.\n\nIf you draft posts, ping me and I'll review before they go live. Faster than learning by getting the client annoyed at us.\n\n{cfg['teammate']['name'].split()[0]}","time":"09:45","read":False,"replied":False,"priority":"medium","category":"teammate","requires_action":False},
         {"id":"e7","simulation_id":sim_id(),"from_name":cfg["director"]["name"],"from_role":cfg["director"]["role"],"from_email":cfg["director"]["email"],"to":"marketing@brightpath.co","subject":"Q2 budget — need numbers by Wednesday","body":f"Team,\n\nI'm pitching Q2 to the board next Friday. I need:\n• Channel-level spend forecast (paid social / SEO / events / content)\n• Projected lead volume by channel\n• Two scenarios: 100% budget and 70% budget\n\n{cfg['manager']['name'].split()[0]}, please pull the new starter into this — good way to learn how we plan.\n\n{cfg['director']['name']}","time":"10:45","read":False,"replied":False,"priority":"high","category":"info","requires_action":False},
         {"id":"e8","simulation_id":sim_id(),"from_name":"Influencer Booking","from_role":"Partnerships Inbox","from_email":"partnerships@brightpath.co","to":"you","subject":"3 creators want NovaTech briefs","body":"Hi,\n\nThree creators replied to our outreach for the NovaTech launch — all in ICP, all under-£3k:\n\n• @MayaCreates — TikTok, 240k followers, tech-lifestyle, £2,400\n• @sam.builds — YouTube, 92k subs, deep-tech reviews, £2,800\n• @arianaonline — Instagram, 410k followers, lifestyle, £1,900\n\nPlease shortlist 2 and send a brief by tomorrow. Forward your picks back to me.\n\nPartnerships","time":"11:00","read":False,"replied":False,"priority":"medium","category":"task","requires_action":True},
     ])
@@ -1950,10 +2356,10 @@ def seed_marketing(cfg):
         {"id":"t2","simulation_id":sim_id(),"title":"Draft 3 social media posts","description":"LinkedIn, Twitter, Instagram for NovaTech product launch","priority":"high","deadline":"15:00","status":"pending","points":35},
         {"id":"t3","simulation_id":sim_id(),"title":"Update materials with new brand guidelines","description":"NovaTech changed colours and tone. Update all drafts.","priority":"high","deadline":"14:00","status":"pending","points":25},
         {"id":"t4","simulation_id":sim_id(),"title":"Prepare email newsletter draft","description":"Product launch newsletter for NovaTech","priority":"medium","deadline":"tomorrow","status":"pending","points":15},
-        {"id":"t5","simulation_id":sim_id(),"title":"Pull last month's engagement analytics","description":"Google Analytics + Hootsuite metrics for board meeting","priority":"medium","deadline":"tomorrow","status":"pending","points":15},
+        {"id":"t5","simulation_id":sim_id(),"title":"Pull last month's engagement analytics","description":"Use Campaigns tool metrics (reach, CTR, calendar) for the board pack. Save a one-pager to Files if needed.","priority":"medium","deadline":"tomorrow","status":"pending","points":15},
         {"id":"t6","simulation_id":sim_id(),"title":"Shortlist 2 creators + send briefs","description":"Pick 2 of @MayaCreates / @sam.builds / @arianaonline. Brief by tomorrow.","priority":"medium","deadline":"tomorrow","status":"pending","points":20},
         {"id":"t7","simulation_id":sim_id(),"title":"Pull Q2 channel-level spend forecast","description":"Director needs paid social / SEO / events / content split, 100% and 70% scenarios.","priority":"high","deadline":"Wednesday","status":"pending","points":25},
-        {"id":"t8","simulation_id":sim_id(),"title":"Schedule social posts in Hootsuite","description":"Once posts are approved, schedule across LinkedIn / Twitter / Instagram for launch day.","priority":"medium","deadline":"tomorrow","status":"pending","points":15},
+        {"id":"t8","simulation_id":sim_id(),"title":"Schedule social posts in Campaigns","description":"Once posts are approved, schedule them in the Campaigns tool for launch day.","priority":"medium","deadline":"tomorrow","status":"pending","points":15},
         {"id":"t9","simulation_id":sim_id(),"title":"Send weekly metrics summary","description":"One-page email to manager: top post, CTR, reach, anomalies.","priority":"medium","deadline":"Friday","status":"pending","points":10},
     ])
     _seed_marketing_artifacts(cfg)
@@ -2079,8 +2485,8 @@ def seed_developer(cfg):
         {"id":"e3","simulation_id":sim_id(),"from_name":"HR Team","from_role":"HR","from_email":"hr@codecraft.dev","to":"you","subject":"Developer onboarding","body":"Welcome! Complete today:\n1. Set up Git SSH keys\n2. Clone the monorepo\n3. Read the contributing guide\n4. Complete code of conduct acknowledgment\n\nBadge: CC-2847","time":"08:45","read":False,"replied":False,"priority":"medium","category":"onboarding","requires_action":True},
         {"id":"e4","simulation_id":sim_id(),"from_name":cfg["it"]["name"],"from_role":cfg["it"]["role"],"from_email":cfg["it"]["email"],"to":"you","subject":"Dev environment ready","body":f"Your dev env is set up:\n- GitHub: team access granted\n- Jira: dev board access\n- Slack: #engineering\n- CI/CD: read access to pipelines\n\n{cfg['it']['name']}","time":"08:30","read":False,"replied":False,"priority":"low","category":"info","requires_action":False},
         {"id":"e5","simulation_id":sim_id(),"from_name":cfg["teammate"]["name"],"from_role":cfg["teammate"]["role"],"from_email":cfg["teammate"]["email"],"to":"you","subject":"QA found issues with your approach","body":"Hi,\n\nI saw you picked up BUG-301. Just a heads up — last time someone tried to fix the Safari login crash, they broke the OAuth flow on Chrome. Please make sure you test across all browsers before submitting the PR.\n\nAlso, I think the root cause is in the CSS viewport meta tag, not the JavaScript. But Mike thinks it's a JS issue. Up to you.\n\nAisha","time":"09:30","read":False,"replied":False,"priority":"medium","category":"teammate","requires_action":False},
-        {"id":"e6","simulation_id":sim_id(),"from_name":"CI Bot","from_role":"Continuous Integration","from_email":"ci@codecraft.dev","to":"you","subject":"[CI] main is red — auth-tests flaky","body":"Hi,\n\n3 of the last 5 runs on `main` failed at:\n  auth.test.ts › OAuth flow › popup opens on Safari\n\nIntermittent — passes on retry. Likely race condition or timing-dependent test. Test owner: you (per CODEOWNERS).\n\nLink: https://ci.codecraft.dev/runs/main/3471\n\nCI Bot","time":"09:50","read":False,"replied":False,"priority":"high","category":"task","requires_action":True},
-        {"id":"e7","simulation_id":sim_id(),"from_name":cfg["director"]["name"],"from_role":cfg["director"]["role"],"from_email":cfg["director"]["email"],"to":"engineering@codecraft.dev","subject":"Postmortem template — for any P1 you touch","body":f"All,\n\nWhen we hit a P1, I want a written postmortem within 48 hours. Use the template in /docs/postmortem.md. Sections:\n• Timeline\n• Root cause (5-whys)\n• What worked\n• What didn't\n• Action items with owners + due dates\n\nNew starters: own the doc end-to-end if you touched the incident. Best way to learn the codebase fast.\n\n{cfg['director']['name']}","time":"10:45","read":False,"replied":False,"priority":"medium","category":"info","requires_action":False},
+        {"id":"e6","simulation_id":sim_id(),"from_name":"CI Bot","from_role":"Continuous Integration","from_email":"ci@codecraft.dev","to":"you","subject":"[CI] main is red — auth-tests flaky","body":"Hi,\n\n3 of the last 5 runs on `main` failed at:\n  auth.test.ts › OAuth flow › popup opens on Safari\n\nIntermittent — passes on retry. Likely race condition or timing-dependent test. Test owner: you (per CODEOWNERS).\n\nOpen the pipeline: [Open CI status](firstdesk://ci)\n\nCI Bot","time":"09:50","read":False,"replied":False,"priority":"high","category":"task","requires_action":True},
+        {"id":"e7","simulation_id":sim_id(),"from_name":cfg["director"]["name"],"from_role":cfg["director"]["role"],"from_email":cfg["director"]["email"],"to":"engineering@codecraft.dev","subject":"Postmortem template — for any P1 you touch","body":f"All,\n\nWhen we hit a P1, I want a written postmortem within 48 hours. Use the attached template (also in Files: [Open Files](firstdesk://files)). Sections:\n• Timeline\n• Root cause (5-whys)\n• What worked\n• What didn't\n• Action items with owners + due dates\n\nNew starters: own the doc end-to-end if you touched the incident. Best way to learn the codebase fast.\n\n{cfg['director']['name']}","time":"10:45","read":False,"replied":False,"priority":"medium","category":"info","requires_action":False},
         {"id":"e8","simulation_id":sim_id(),"from_name":cfg["client"]["name"],"from_role":cfg["client"]["role"],"from_email":cfg["client"]["email"],"to":"you","subject":"Estimate for FEAT-156 v2 — when?","body":"Hi,\n\nFollowing on from the scope change — when will we have a revised estimate for the dark-mode feature? Sales is asking what to tell the client. I can hold them off until tomorrow morning but I need a number, even rough.\n\nThanks,\nProduct","time":"11:00","read":False,"replied":False,"priority":"high","category":"task","requires_action":True},
     ])
     tasks_col.insert_many([
@@ -2092,7 +2498,7 @@ def seed_developer(cfg):
         {"id":"t6","simulation_id":sim_id(),"title":"Investigate flaky auth-tests on main","description":"3 of last 5 runs failed on Safari OAuth popup test. Find race condition.","priority":"high","deadline":"15:00","status":"pending","points":20},
         {"id":"t7","simulation_id":sim_id(),"title":"Send revised FEAT-156 estimate to Product","description":"Hours, blockers, risks. Even rough — Product needs a number by tomorrow AM.","priority":"high","deadline":"tomorrow","status":"pending","points":15},
         {"id":"t8","simulation_id":sim_id(),"title":"Open PR for BUG-301","description":"Once fix is verified, open PR, request review from teammate, link Jira.","priority":"high","deadline":"16:00","status":"pending","points":15},
-        {"id":"t9","simulation_id":sim_id(),"title":"Write postmortem if any P1 fired today","description":"Use /docs/postmortem.md template. Timeline, root cause, action items.","priority":"medium","deadline":"tomorrow","status":"pending","points":15},
+        {"id":"t9","simulation_id":sim_id(),"title":"Write postmortem if any P1 fired today","description":"Use the in-sim Files folder / attached template. Timeline, root cause, action items.","priority":"medium","deadline":"tomorrow","status":"pending","points":15},
     ])
     _seed_developer_artifacts(cfg)
 
@@ -2894,7 +3300,14 @@ def read_email(email_id: str) -> str:
         if c: return f"FROM: {c['from_agent']}\nTO: {c['to_agent']} (CC: you)\nSUBJECT: {c['subject']}\n\n{c['body']}"
         return "Not found."
     sessions_col.update_one({"session_id": session_id()}, {"$addToSet": {"emails_read": email_id}})
-    return f"FROM: {e['from_name']} ({e.get('from_role','')})\nTO: {e.get('to','you')}\nSUBJECT: {e['subject']}\n\n{e['body']}"
+    e = _hydrate_email_surfaces(e)
+    atts = e.get("attachments") or []
+    att_block = ""
+    if atts:
+        att_block = "\n\nATTACHMENTS:\n" + "\n".join(
+            f"- {a.get('title')} (open in Outlook)\n{a.get('body','')[:400]}" for a in atts
+        )
+    return f"FROM: {e['from_name']} ({e.get('from_role','')})\nTO: {e.get('to','you')}\nSUBJECT: {e['subject']}\n\n{e['body']}{att_block}"
 
 @tool
 def send_reply(email_id: str, reply_text: str) -> str:
@@ -2917,8 +3330,9 @@ def complete_task(task_id: str) -> str:
     t = tasks_col.find_one({"id": task_id, "simulation_id": sim_id()}, {"_id": 0})
     if not t:
         return "Not found or already reviewed."
-    if _is_onboarding_forms_task(t) and not _hr_onboarding_submitted():
-        return "Blocked: the HR portal checklist has not been submitted. Tell the user to open the HR portal from the onboarding email first."
+    blocked = _task_complete_block(t)
+    if blocked:
+        return f"Blocked: {blocked[1]}"
     r = tasks_col.update_one({"id": task_id, "simulation_id": sim_id(), "review_status": {"$ne": "approved"}}, {"$set": {"status": "done", "review_status": "pending_review", "completed_at": datetime.utcnow().isoformat()}})
     if r.modified_count == 0: return "Not found or already reviewed."
     t = tasks_col.find_one({"id": task_id}, {"_id": 0})
@@ -2960,7 +3374,7 @@ def manager_review_task(task_id: str, verdict: str, feedback: str) -> str:
 
 @tool
 def get_tool_data(tool_name: str) -> str:
-    """Get data from a career-specific tool: sage_bank, sage_ledger, sage_invoices, siem_alerts, jira_tickets, campaigns, po_approvals, vendor_catalog, training_programs, learner_pipeline, roadmap, feature_requests, risk_register, control_library, hr_onboarding."""
+    """Get data from a career-specific tool: sage_bank, sage_ledger, sage_invoices, siem_alerts, jira_tickets, campaigns, po_approvals, vendor_catalog, training_programs, learner_pipeline, roadmap, feature_requests, risk_register, control_library, hr_onboarding, training, it_setup, files, attachments, meetings."""
     if tool_name == "sage_bank":
         s = sheets_col.find_one({"simulation_id": sim_id()}, {"_id": 0})
         if not s: return "No data."
@@ -3057,6 +3471,42 @@ def get_tool_data(tool_name: str) -> str:
             f"Right to work: {doc.get('right_to_work')}. "
             f"Bank details on file (sort {doc.get('sort_code')}, account ending {str(doc.get('account_number') or '')[-4:]})."
         )
+    elif tool_name == "training":
+        doc = _training_submitted()
+        if not doc:
+            return "Training: NOT SUBMITTED. Required modules are still open."
+        done = ", ".join(doc.get("completed_ids") or []) or "all listed modules"
+        return f"Training: SUBMITTED at {doc.get('submitted_at')}. Modules completed: {done}."
+    elif tool_name in ("it_setup", "it-setup"):
+        doc = _it_setup_submitted()
+        if not doc:
+            return "IT setup: NOT SUBMITTED. YubiKey/SSH/VPN checklist is empty."
+        done = ", ".join(doc.get("completed_ids") or []) or "all listed items"
+        return f"IT setup: SUBMITTED at {doc.get('submitted_at')}. Items: {done}."
+    elif tool_name == "files":
+        saves = _files_saved()
+        if not saves:
+            return "Files: no saves yet. SharePoint/shared-drive folder is empty."
+        return "Files: SAVED\n" + "\n".join(
+            f"- {s.get('folder')}/{s.get('filename')} at {s.get('saved_at')}" for s in saves
+        )
+    elif tool_name == "attachments":
+        viewed = _attachments_viewed()
+        if not viewed:
+            return "Attachments: none opened yet."
+        return "Attachments: OPENED " + ", ".join(viewed)
+    elif tool_name == "meetings":
+        s = sessions_col.find_one({"session_id": session_id()}, {"meetings": 1}) or {}
+        recs = s.get("meetings") or {}
+        if not recs:
+            return "Meetings: none attended yet."
+        lines = []
+        for mid, rec in recs.items():
+            lines.append(
+                f"{mid}: state={rec.get('state')} submitted={bool(rec.get('submitted_at'))} "
+                f"accuracy={rec.get('accuracy')} score={rec.get('score')}"
+            )
+        return "Meetings:\n" + "\n".join(lines)
     return f"Unknown tool: {tool_name}"
 
 @tool
@@ -3131,21 +3581,21 @@ def add_performance_note(note: str) -> str:
 def inject_task(title: str, description: str, priority: str, deadline: str, points: int) -> str:
     """Dynamically add a new task."""
     tid = f"t_{uuid.uuid4().hex[:6]}"
-    tasks_col.insert_one({"id": tid, "simulation_id": sim_id(), "title": title, "description": description, "priority": priority, "deadline": deadline, "status": "pending", "points": points, "injected": True})
+    tasks_col.insert_one({"id": tid, "simulation_id": sim_id(), "title": title, "description": rewrite_in_sim_surfaces(description or ""), "priority": priority, "deadline": deadline, "status": "pending", "points": points, "injected": True})
     return f"New task: {title} [{priority}] due {deadline}"
 
 @tool
 def inject_email(from_name: str, subject: str, body: str, priority: str) -> str:
     """Send a new email to user's inbox from any agent."""
     eid = f"e_{uuid.uuid4().hex[:6]}"
-    emails_col.insert_one({"id": eid, "simulation_id": sim_id(), "from_name": from_name, "from_role": "dynamic", "from_email": "dynamic", "to": "you", "subject": subject, "body": body, "time": datetime.utcnow().strftime("%H:%M"), "read": False, "replied": False, "priority": priority, "category": "dynamic", "requires_action": True, "injected": True})
+    emails_col.insert_one({"id": eid, "simulation_id": sim_id(), "from_name": from_name, "from_role": "dynamic", "from_email": "dynamic", "to": "you", "subject": subject, "body": rewrite_in_sim_surfaces(body or ""), "time": datetime.utcnow().strftime("%H:%M"), "read": False, "replied": False, "priority": priority, "category": "dynamic", "requires_action": True, "injected": True})
     return f"Email from {from_name}: '{subject}'"
 
 @tool
 def agent_to_agent_email(from_agent: str, to_agent: str, subject: str, body: str, cc_user: bool) -> str:
     """Send an email between agents. If cc_user=True, user sees it in their inbox. Used for inter-agent communication like manager reporting to HR about user's performance."""
     cid = f"ac_{uuid.uuid4().hex[:6]}"
-    agent_comms_col.insert_one({"id": cid, "simulation_id": sim_id(), "from_agent": from_agent, "to_agent": to_agent, "subject": subject, "body": body, "cc_user": cc_user, "visible_to_user": cc_user, "timestamp": datetime.utcnow().strftime("%H:%M")})
+    agent_comms_col.insert_one({"id": cid, "simulation_id": sim_id(), "from_agent": from_agent, "to_agent": to_agent, "subject": subject, "body": rewrite_in_sim_surfaces(body or ""), "cc_user": cc_user, "visible_to_user": cc_user, "timestamp": datetime.utcnow().strftime("%H:%M")})
     if cc_user:
         return f"Agent email: {from_agent} → {to_agent} (user CC'd): '{subject}'"
     return f"Agent email: {from_agent} → {to_agent} (private): '{subject}'"
@@ -3791,8 +4241,14 @@ MANAGER TASK REVIEW (this is the PRIMARY scoring mechanism — most points come 
 - Just clicking "complete" only earns the user 20% of a task's points (a small "completion credit").
 - The remaining 80% (the "manager satisfaction bonus") is ONLY awarded if YOU, as the manager, review the work and approve it via manager_review_task.
 - On EVERY response, call get_tasks first to look for tasks with review_status="pending_review". If any exist, you MUST review them BEFORE replying conversationally.
-- To review properly, EXAMINE THE EVIDENCE — use get_tool_data (sage_ledger / sage_invoices / siem_alerts / jira_tickets / campaigns / hr_onboarding) and read_email to see what the user actually did. Did they post the right journal? Reply to the client? Update the campaign with the correct brand colour? Triage the alert correctly? Submit the HR portal checklist?
+- To review properly, EXAMINE THE EVIDENCE — use get_tool_data (sage_ledger / sage_invoices / siem_alerts / jira_tickets / campaigns / hr_onboarding / training / it_setup / files / attachments / meetings) and read_email to see what the user actually did. Did they post the right journal? Reply to the client? Update the campaign with the correct brand colour? Triage the alert correctly? Submit the HR portal / training / IT-setup checklist? Save the file? Comment evidence on COMP-014?
 - For onboarding / HR portal / starter-checklist / bank-details tasks: call get_tool_data("hr_onboarding") FIRST. If it says SUBMITTED, that is the evidence — approve and cite the portal submission. Do not demand a handwritten reply if the portal already filed a confirmation to HR. If it says NOT SUBMITTED, mark needs_rework and tell them to open the HR portal from the HR email (not just click Complete).
+- For training / LMS / handbook / GDPR / HIPAA / e-learning / policy-acknowledgement tasks: call get_tool_data("training") FIRST. SUBMITTED is the evidence — approve. Do not demand a handwritten reply.
+- For YubiKey / SSH / VPN / clone-repo / Hootsuite-access tasks: call get_tool_data("it_setup") FIRST. SUBMITTED is the evidence — approve.
+- For SharePoint / shared-drive / data-room / v2-folder save tasks: call get_tool_data("files") FIRST. SAVED is the evidence — approve.
+- For ISO 27001 / COMP-014 evidence: call get_tool_data("jira_tickets"). A comment by the user on COMP-014 is the evidence — approve. Do not demand a file upload.
+- For PDF / questionnaire / draft / repro-steps / checklist-attached tasks: call get_tool_data("attachments"). OPENED is the evidence they read it; then check their reply or tool work as usual.
+- For standup / meeting / bridge / exit-meeting tasks: call get_tool_data("meetings"). Attended + submitted update is the evidence — approve. Do not demand a handwritten recap if they already spoke in the room.
 - Then call manager_review_task(task_id, verdict, feedback):
   * verdict="approved" — work is solid, evidence backs it up. Pays 80% of task points. Feedback MUST cite a specific artifact ("Saw your journal posting £150 to Petty Cash — clean entry, ties to the bank statement"). Generic praise is forbidden.
   * verdict="needs_rework" — task marked done but evidence is missing or incomplete (no journal posted, no email reply sent, alert not triaged). Pays nothing, reopens the task. Feedback must say WHAT'S MISSING.
@@ -3933,7 +4389,7 @@ def _classify_route(state: _OrcState) -> dict:
         "- hr: conduct issues, complaints about colleagues, code-of-conduct, formal escalation, tone problems."
     )
     try:
-        resp = llm.invoke([("system", sys), ("human", text)])
+        resp = llm.invoke([("system", sys), ("human", text)], config=_ls_config("supervisor_route"))
         choice = (getattr(resp, "content", "") or "").strip().lower().split()[0] if resp else "manager"
     except Exception as ex:
         log.warning("supervisor.route_failed kind=%s falling back to manager", type(ex).__name__)
@@ -3980,7 +4436,7 @@ def create_orchestrator(career, experience_level: str = "studied"):
         messages it produced so add_messages doesn't duplicate the inputs."""
         def _node(state: _OrcState) -> dict:
             msgs_in = list(state.get("messages") or [])
-            result = agent.invoke({"messages": msgs_in})
+            result = agent.invoke({"messages": msgs_in}, config=_ls_config("persona"))
             out = result.get("messages") or []
             new = out[len(msgs_in):] if len(out) >= len(msgs_in) else out
             return {"messages": new}
@@ -4158,7 +4614,7 @@ def observe_tone(message: str) -> dict:
     if not message or not message.strip():
         return {}
     try:
-        resp = observer_llm.invoke([("system", TONE_PROMPT), ("human", message[:1000])])
+        resp = observer_llm.invoke([("system", TONE_PROMPT), ("human", message[:1000])], config=_ls_config("tone_observer"))
         text = resp.content if hasattr(resp, "content") else str(resp)
         s, e = text.find("{"), text.rfind("}")
         if s < 0 or e < 0:
@@ -4225,7 +4681,7 @@ def generate_followup(sender_cfg: dict, company: str, subject: str, original_bod
             original_body=(original_body or "")[:600],
             reply_text=(reply_text or "")[:600],
         )
-        resp = observer_llm.invoke([("system", prompt), ("human", "Compose the reply now.")])
+        resp = observer_llm.invoke([("system", prompt), ("human", "Compose the reply now.")], config=_ls_config("email_followup"))
         return (resp.content if hasattr(resp, "content") else str(resp)).strip()
     except Exception as ex:
         log.warning("followup.error err=%s", ex)
@@ -4499,6 +4955,13 @@ class HrOnboardingReq(BaseModel):
         if not cleaned:
             raise ValueError("Must contain digits")
         return cleaned
+
+class ChecklistSubmitReq(BaseModel):
+    completed_ids: list[str] = Field(default_factory=list)
+
+class FilesSaveReq(BaseModel):
+    folder: SafeStr = Field(..., min_length=1, max_length=120)
+    filename: SafeStr = Field(..., min_length=1, max_length=80)
 
 # ── ERROR ENVELOPE HELPERS ────────────────────────────────────────
 APP_VERSION = os.environ.get("APP_VERSION", "0.1.0")
@@ -4963,7 +5426,7 @@ async def chat(req: ChatReq, request: Request, background: BackgroundTasks):
     # like ("human", "...") / ("ai", "...") are accepted directly.
     messages_in = list(history) + [("human", req.message)]
     try:
-        result = orc.invoke({"messages": messages_in})
+        result = orc.invoke({"messages": messages_in}, config=_ls_config("orchestrator"))
     except Exception as ex:
         log.exception("chat.invoke_crashed kind=%s", type(ex).__name__)
         kind = type(ex).__name__
@@ -5122,18 +5585,20 @@ async def api_inbox():
     _q1 = asyncio.to_thread(lambda: list(emails_col.find({"simulation_id": _sim, "$or": [{"day": {"$lte": _day}}, {"day": {"$exists": False}}]}, {"_id": 0}).sort("time", 1)))
     _q2 = asyncio.to_thread(lambda: list(agent_comms_col.find({"simulation_id": _sim, "visible_to_user": True}, {"_id": 0}).sort("timestamp", 1)))
     mails, comms = await asyncio.gather(_q1, _q2)
-    for e in mails:
-        if e.get("body"):
-            e["body"] = _ensure_hr_portal_link(e["body"])
+    mails = [_hydrate_email_surfaces(e) for e in mails]
     # Convert agent comms to email format for the frontend
     for c in comms:
-        mails.append({"id": c["id"], "from_name": c["from_agent"], "from_role": f"→ {c['to_agent']} (CC: you)", "from_email": "", "to": c["to_agent"], "subject": c["subject"], "body": c["body"], "time": c.get("timestamp", ""), "read": False, "replied": False, "priority": "medium", "category": "agent_comm", "requires_action": False})
+        mails.append(_hydrate_email_surfaces({"id": c["id"], "from_name": c["from_agent"], "from_role": f"→ {c['to_agent']} (CC: you)", "from_email": "", "to": c["to_agent"], "subject": c["subject"], "body": c["body"], "time": c.get("timestamp", ""), "read": False, "replied": False, "priority": "medium", "category": "agent_comm", "requires_action": False}))
     return {"emails": mails}
 
 @app.get("/api/tasks")
 async def api_tasks():
     _day = _current_day()
-    return {"tasks": list(tasks_col.find({"simulation_id": sim_id(), "$or": [{"day": {"$lte": _day}}, {"day": {"$exists": False}}]}, {"_id": 0}))}
+    tasks = list(tasks_col.find({"simulation_id": sim_id(), "$or": [{"day": {"$lte": _day}}, {"day": {"$exists": False}}]}, {"_id": 0}))
+    for t in tasks:
+        if t.get("description"):
+            t["description"] = rewrite_in_sim_surfaces(t["description"])
+    return {"tasks": tasks}
 
 @app.post("/api/task/{task_id}/complete")
 async def api_complete_task(task_id: str):
@@ -5142,12 +5607,9 @@ async def api_complete_task(task_id: str):
     t = tasks_col.find_one({"id": task_id, "simulation_id": sim_id()}, {"_id": 0})
     if not t:
         return _err("not_found", "Task not found.", status=404)
-    if _is_onboarding_forms_task(t) and not _hr_onboarding_submitted():
-        return _err(
-            "hr_portal_required",
-            "Open the HR portal from the onboarding email and submit the checklist before marking this done.",
-            status=400,
-        )
+    blocked = _task_complete_block(t)
+    if blocked:
+        return _err(blocked[0], blocked[1], status=400)
     r = tasks_col.update_one(
         {"id": task_id, "simulation_id": sim_id(), "review_status": {"$ne": "approved"}},
         {"$set": {"status": "done", "review_status": "pending_review", "completed_at": datetime.utcnow().isoformat()}},
@@ -5225,6 +5687,121 @@ async def api_hr_onboarding_submit(req: HrOnboardingReq):
     except Exception:
         pass
     return {"ok": True, "submitted": True, "replied_email_ids": replied_ids}
+
+
+def _checklist_items(kind: str) -> list[dict]:
+    career = get_career() or ""
+    if kind == "training":
+        return list(_TRAINING_MODULES.get(career) or [])
+    if kind == "it_setup":
+        return list(_IT_SETUP_ITEMS.get(career) or [])
+    return []
+
+
+def _checklist_col(kind: str):
+    return training_col if kind == "training" else it_setup_col
+
+
+@app.get("/api/checklist/{kind}")
+async def api_checklist_get(kind: str):
+    if kind not in ("training", "it_setup"):
+        return _err("not_found", "Unknown checklist.", status=404)
+    items = _checklist_items(kind)
+    doc = _checklist_col(kind).find_one({"simulation_id": sim_id()}, {"_id": 0}) or {}
+    return {
+        "kind": kind,
+        "title": "Training" if kind == "training" else "IT setup",
+        "items": items,
+        "submitted": bool(doc.get("submitted")),
+        "completed_ids": doc.get("completed_ids") or [],
+        "folder_hint": _DEFAULT_FILE_FOLDERS.get(get_career() or "", ""),
+    }
+
+
+@app.post("/api/checklist/{kind}")
+async def api_checklist_submit(kind: str, req: ChecklistSubmitReq):
+    if kind not in ("training", "it_setup"):
+        return _err("not_found", "Unknown checklist.", status=404)
+    items = _checklist_items(kind)
+    required = {i["id"] for i in items}
+    if not required:
+        return _err("not_applicable", "No checklist items for this role.")
+    got = {x for x in (req.completed_ids or []) if x in required}
+    if got != required:
+        return _err("incomplete", "Mark every required item complete.")
+    now = datetime.utcnow().isoformat()
+    rec = {
+        "simulation_id": sim_id(),
+        "user_id": user_id() or "",
+        "submitted": True,
+        "submitted_at": now,
+        "completed_ids": sorted(got),
+        "kind": kind,
+    }
+    _checklist_col(kind).update_one({"simulation_id": sim_id()}, {"$set": rec}, upsert=True)
+    label = "training modules" if kind == "training" else "IT setup checklist"
+    try:
+        _post_slack_system("#general", "You", f"Submitted my {label}.")
+    except Exception:
+        pass
+    return {"ok": True, "submitted": True}
+
+
+@app.get("/api/files")
+async def api_files_get():
+    career = get_career() or ""
+    return {
+        "saves": _files_saved(),
+        "default_folder": _DEFAULT_FILE_FOLDERS.get(career, "Shared/Inbox"),
+        "default_filename": "note.md",
+    }
+
+
+@app.post("/api/files")
+async def api_files_save(req: FilesSaveReq):
+    rec = {
+        "simulation_id": sim_id(),
+        "user_id": user_id() or "",
+        "folder": req.folder.strip(),
+        "filename": req.filename.strip(),
+        "saved_at": datetime.utcnow().isoformat(),
+        "saved": True,
+    }
+    files_col.insert_one(dict(rec))
+    rec.pop("_id", None)
+    try:
+        _post_slack_system("#general", "You", f"Saved {req.filename} to {req.folder}.")
+    except Exception:
+        pass
+    return {"ok": True, "save": rec}
+
+
+@app.get("/api/ci")
+async def api_ci_status():
+    return {
+        "title": "CI — main",
+        "run": "3471",
+        "status": "red",
+        "summary": "3 of the last 5 runs on main failed at auth.test.ts › OAuth flow › popup opens on Safari. Intermittent — passes on retry. Likely race / timing. Test owner: you (CODEOWNERS).",
+        "runs": [
+            {"id": 3471, "result": "fail", "note": "auth.test.ts › OAuth flow › popup opens on Safari"},
+            {"id": 3470, "result": "pass", "note": "retry green"},
+            {"id": 3469, "result": "fail", "note": "same Safari OAuth popup flake"},
+            {"id": 3468, "result": "pass", "note": ""},
+            {"id": 3467, "result": "fail", "note": "same flake"},
+        ],
+    }
+
+
+@app.post("/api/attachments/{att_id}/view")
+async def api_attachment_view(att_id: str):
+    sessions_col.update_one(
+        {"session_id": session_id()},
+        {"$addToSet": {"attachments_viewed": att_id}},
+        upsert=False,
+    )
+    return {"ok": True, "viewed": att_id}
+
 
 @app.get("/api/spreadsheet")
 async def api_sheet():
@@ -6285,7 +6862,7 @@ _MEETINGS: dict[str, dict[int, list[dict]]] = {
             "id": "cyber-d1-standup",
             "title": "Morning standup",
             "sim_time": "11:00",
-            "task_id": "t4",          # the authored "Prep for 11am standup" task
+            "task_id": "t4",
             "points": 10,
             "host_key": "manager",
             "ask": "Your triage summary: what you found, what you escalated, what you're still chasing.",
@@ -6298,6 +6875,161 @@ _MEETINGS: dict[str, dict[int, list[dict]]] = {
                 {"who": "manager",  "text": "Right, quick one. Two minutes each, then back to it. Priya, go."},
                 {"who": "teammate", "text": "Overnight I closed the Ligolo beacon on FIN-04. Confirmed C2, host's isolated. Still chasing the lateral attempts coming off it."},
                 {"who": "manager",  "text": "Good. You've had the morning on the overnight queue — what have you got?"},
+            ],
+        }],
+        3: [{
+            "id": "cyber-d3-p0-bridge",
+            "title": "P0 incident bridge",
+            "sim_time": "09:15",
+            "points": 12,
+            "host_key": "manager",
+            "ask": "FILE-SRV-02 ransomware. What you triaged, what you escalated, what still needs a human.",
+            "prep": [
+                "Anything related to FILE-SRV-02 or FIN-LAPTOP-12 — escalate, don't resolve.",
+                "What you have already actioned this morning.",
+            ],
+            "opening": [
+                {"who": "manager", "text": "P0 is live. Finance share is encrypted. I need a 60-second status, then we split."},
+                {"who": "teammate", "text": "Isolation is in progress on FILE-SRV-02. Don't close related alerts — park them as escalate."},
+                {"who": "manager", "text": "Your queue — go."},
+            ],
+        }],
+    },
+    "accountant": {
+        1: [{
+            "id": "acc-d1-team",
+            "title": "Team meeting",
+            "sim_time": "14:00",
+            "task_id": "t4",
+            "points": 10,
+            "host_key": "manager",
+            "ask": "Reconciliation progress: discrepancies found, still open, blockers.",
+            "prep": [
+                "Which discrepancies you flagged, with amounts.",
+                "Crawford invoice status.",
+                "What you'll finish before close.",
+            ],
+            "opening": [
+                {"who": "manager", "text": "Quick round. Rec first, then Crawford. David, anything burning?"},
+                {"who": "teammate", "text": "VAT-exempt recode on Crawford is the one to watch. I'll back you if you have the £600 line."},
+                {"who": "manager", "text": "Over to you — where's the rec?"},
+            ],
+        }],
+    },
+    "developer": {
+        1: [{
+            "id": "dev-d1-standup",
+            "title": "Sprint standup",
+            "sim_time": "10:00",
+            "task_id": "t5",
+            "points": 10,
+            "host_key": "manager",
+            "ask": "Your plan for BUG-301, BUG-287, and FEAT-156. Blockers, not biography.",
+            "prep": [
+                "What you'll pick up first and why.",
+                "Any risk to the Friday release.",
+            ],
+            "opening": [
+                {"who": "manager", "text": "Standup. Safari crash is the release blocker — I want a plan, not a postmortem yet."},
+                {"who": "teammate", "text": "QA can retest Safari this afternoon if the PR is up. Don't skip Chrome OAuth."},
+                {"who": "manager", "text": "Your tickets — go."},
+            ],
+        }],
+    },
+    "procurement": {
+        1: [{
+            "id": "proc-d1-standup",
+            "title": "Procurement standup",
+            "sim_time": "10:00",
+            "points": 10,
+            "host_key": "manager",
+            "ask": "Cursor PO, Datadog renewal, Snyk — one line each, then blockers.",
+            "prep": [
+                "Whether you will backdate Cursor (spoiler: no).",
+                "Datadog usage / right-size.",
+                "Snyk ready for CFO or not.",
+            ],
+            "opening": [
+                {"who": "manager", "text": "Ten minutes. Marcus is already circling Cursor. Olu, Datadog?"},
+                {"who": "teammate", "text": "Datadog is over-provisioned. Don't sign the 3-year until usage is pulled."},
+                {"who": "manager", "text": "Your first-day read — go."},
+            ],
+        }],
+    },
+    "pm": {
+        1: [{
+            "id": "pm-d1-standup",
+            "title": "Growth standup",
+            "sim_time": "09:30",
+            "points": 10,
+            "host_key": "manager",
+            "ask": "RM-501 instrumentation, RM-504 opt-out, Sales asks. No public Drew-bashing.",
+            "prep": [
+                "How you'll unwind the pricing test without naming names.",
+                "RM-502 as the real Q2 story.",
+            ],
+            "opening": [
+                {"who": "manager", "text": "Standup. Pricing-page number is in the all-hands — we correct it quietly today."},
+                {"who": "teammate", "text": "I've got the warehouse query if you want a screenshot. Frame it as instrumentation review."},
+                {"who": "manager", "text": "Your plan — 90 seconds."},
+            ],
+        }],
+        5: [{
+            "id": "pm-d5-ceo",
+            "title": "Roadmap commit meeting",
+            "sim_time": "14:00",
+            "task_id": "pm-d5-t1",
+            "points": 15,
+            "host_key": "director",
+            "ask": "Three Q2 commits, three explicit non-commits, RM-502 status, pricing-test reset.",
+            "prep": [
+                "Decisions in the room are kept — no 'we'll get back to you'.",
+                "RM-502 numbers.",
+                "Drew's real lift, not the celebrated one.",
+            ],
+            "opening": [
+                {"who": "director", "text": "Thirty minutes. Commits, non-commits, then RM-502. Brendan, don't hijack."},
+                {"who": "teammate", "text": "Sales will push for the Acme picker. Hold the line unless it's actually scoped."},
+                {"who": "director", "text": "Take us through it."},
+            ],
+        }],
+    },
+    "hr": {
+        1: [{
+            "id": "hr-d1-standup",
+            "title": "L&D standup",
+            "sim_time": "10:00",
+            "points": 10,
+            "host_key": "manager",
+            "ask": "TP-301 module fix, TP-302 manager chase, Aaron's Tech Lead ask — one line each.",
+            "prep": [
+                "You will not say yes to Aaron.",
+                "Chase managers on security training, not learners.",
+            ],
+            "opening": [
+                {"who": "manager", "text": "Standup. Broken bootcamp module first, then security completion, then Aaron."},
+                {"who": "teammate", "text": "LMS admin can wait. Don't chase learners on TP-302 — managers only."},
+                {"who": "manager", "text": "Your read — go."},
+            ],
+        }],
+    },
+    "grc": {
+        5: [{
+            "id": "grc-d5-exit",
+            "title": "Audit exit meeting",
+            "sim_time": "15:00",
+            "task_id": "grc-d5-t2",
+            "points": 18,
+            "host_key": "client",
+            "ask": "Walk the three exceptions — CC6.1, CC6.3, CC9.2 — with root cause, remediation, owner, date.",
+            "prep": [
+                "Don't over-promise dates you cannot hit.",
+                "Honesty on control status is what kept sampling lighter.",
+            ],
+            "opening": [
+                {"who": "client", "text": "Exit meeting. Three exceptions, rest passed clean. I need final management responses for the report."},
+                {"who": "manager", "text": "We'll walk each one. Dates we can hit, not dates that look good."},
+                {"who": "client", "text": "Start with CC6.1 MFA."},
             ],
         }],
     },
@@ -6481,7 +7213,7 @@ def _meeting_react(sess: dict, m: dict, summary: str, grounding: dict) -> dict:
              f"{json.dumps(grounding, indent=2)}\n\n"
              f"THE USER'S SUMMARY:\n\"\"\"{summary[:2000]}\"\"\"\n\nReact now.")
     try:
-        resp = llm.invoke([("system", _MEETING_REACTION_SYS), ("human", human)])
+        resp = llm.invoke([("system", _MEETING_REACTION_SYS), ("human", human)], config=_ls_config("meeting_reaction"))
         raw = (resp.content or "").strip()
         if raw.startswith("```"):
             raw = raw.strip("`")
@@ -6529,9 +7261,13 @@ async def api_meeting_scene(meeting_id: str):
             {"session_id": session_id()},
             {"$set": {f"meetings.{meeting_id}.joined_at": datetime.utcnow().isoformat()}})
     cfg = CAREER_CONFIGS.get(career or "cybersecurity", CAREER_CONFIGS["cybersecurity"])
-    names = {"manager": cfg["manager"], "teammate": cfg["teammate"], "you": {"name": "You", "role": ""}}
-    opening = [{"who": b["who"], "name": names[b["who"]]["name"],
-                "role": names[b["who"]]["role"], "text": b["text"]}
+    names = {
+        "manager": cfg["manager"], "teammate": cfg["teammate"],
+        "director": cfg["director"], "client": cfg["client"],
+        "you": {"name": "You", "role": ""},
+    }
+    opening = [{"who": b["who"], "name": names.get(b["who"], cfg["manager"])["name"],
+                "role": names.get(b["who"], cfg["manager"]).get("role", ""), "text": b["text"]}
                for b in m.get("opening", [])]
     return {"meeting": rt, "opening": opening,
             "transcript": rec.get("transcript") or [],
@@ -6573,7 +7309,10 @@ async def api_meeting_submit(meeting_id: str, body: MeetingSubmitReq):
     pts = _apply_level_weight(raw, "meeting")
 
     cfg = CAREER_CONFIGS.get(career or "cybersecurity", CAREER_CONFIGS["cybersecurity"])
-    names = {"manager": cfg["manager"]["name"], "teammate": cfg["teammate"]["name"]}
+    names = {
+        "manager": cfg["manager"]["name"], "teammate": cfg["teammate"]["name"],
+        "director": cfg["director"]["name"], "client": cfg["client"]["name"],
+    }
     transcript = (rec.get("transcript") or []) + \
         [{"who": "you", "name": "You", "text": body.summary}] + \
         [{"who": t.get("who", "manager"), "name": names.get(t.get("who", "manager"), "Colleague"),
@@ -7288,7 +8027,7 @@ def _classify_career_from_jd(jd_text: str, title: str = "") -> str:
     if not snippet:
         return "pm"
     try:
-        resp = llm.invoke([("system", _CAREER_CLASSIFIER_PROMPT), ("human", snippet)])
+        resp = llm.invoke([("system", _CAREER_CLASSIFIER_PROMPT), ("human", snippet)], config=_ls_config("career_classifier"))
         choice = (getattr(resp, "content", "") or "").strip().lower().split()[0] if resp else ""
         choice = choice.strip(".,:;()\"'")
         if choice in _VALID_CAREERS:

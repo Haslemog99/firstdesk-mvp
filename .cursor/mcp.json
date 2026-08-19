@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "langsmith": {
+      "command": "./scripts/langsmith-mcp.sh"
+    },
+    "langchain-docs": {
+      "url": "https://docs.langchain.com/mcp"
+    }
+  }
+}

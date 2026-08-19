@@ -1401,9 +1401,17 @@ button{cursor:pointer}
 <!-- Campaign Update Modal -->
 <div class="mo" id="cum"><div class="mod"><h3>📣 Update <span id="cumId" style="color:#0078d4"></span></h3><div id="cumCtx" style="font-size:12px;color:#605e5c;margin-bottom:8px"></div><label>Post copy</label><textarea id="cumContent" placeholder="The body of your social post..." style="width:100%;min-height:80px"></textarea><label>Brand colour (hex)</label><input id="cumColour" placeholder="#0D9488"><label>Tone</label><input id="cumTone" placeholder="bold and innovative"><label>Status</label><select id="cumStatus"><option value="">— no change —</option><option value="in_progress">In Progress</option><option value="scheduled">Scheduled</option><option value="live">Live</option><option value="paused">Paused</option></select><div class="mod-btns"><button class="cc" onclick="ccum()">Cancel</button><button class="ss" onclick="updateCampaign()">Submit</button></div></div></div>
 <!-- Jira Update Modal -->
-<div class="mo" id="jum"><div class="mod"><h3>🎫 Update <span id="jumId" style="color:#0078d4"></span></h3><div id="jumCtx" style="font-size:12px;color:#605e5c;margin-bottom:8px"></div><label>Status</label><select id="jumStatus"><option value="">— no change —</option><option value="open">Open</option><option value="in_progress">In Progress</option><option value="in_review">In Review</option><option value="closed">Closed</option></select><label>Resolution (if closing)</label><select id="jumRes"><option value="">— no change —</option><option value="fixed">Fixed</option><option value="wont_fix">Won't Fix</option><option value="false_positive">False Positive</option><option value="duplicate">Duplicate</option></select><label>Comment</label><textarea id="jumComment" placeholder="What did you do? Why?" style="width:100%;min-height:60px"></textarea><div class="mod-btns"><button class="cc" onclick="cjum()">Cancel</button><button class="ss" onclick="updateTicket()">Update</button></div></div></div>
+<div class="mo" id="jum"><div class="mod"><h3>🎫 Update <span id="jumId" style="color:#0078d4"></span></h3><div id="jumCtx" style="font-size:12px;color:#605e5c;margin-bottom:8px"></div><label>Status</label><select id="jumStatus"><option value="">— no change —</option><option value="open">Open</option><option value="in_progress">In Progress</option><option value="in_review">In Review</option><option value="closed">Closed</option></select><label>Resolution (if closing)</label><select id="jumRes"><option value="">— no change —</option><option value="fixed">Fixed</option><option value="wont_fix">Won't Fix</option><option value="false_positive">False Positive</option><option value="duplicate">Duplicate</option></select><label>Comment / evidence note</label><textarea id="jumComment" placeholder="What did you do? For COMP-014: paste your evidence notes here." style="width:100%;min-height:60px"></textarea><div class="mod-btns"><button class="cc" onclick="cjum()">Cancel</button><button class="ss" onclick="updateTicket()">Update</button></div></div></div>
 <!-- HR Portal (new-starter checklist) -->
 <div class="mo" id="hrp"><div class="mod"><h3>HR portal — new starter checklist</h3><p style="font-size:12px;color:#605e5c;margin:0 0 12px;line-height:1.5">Simulation only — use any plausible UK details. Submitting files the checklist HR asked for.</p><div id="hrpDone" style="display:none;font-size:13px;color:#047857;margin-bottom:10px">Checklist already submitted.</div><label>Sort code</label><input id="hrpSort" placeholder="04-00-04" autocomplete="off"><label>Account number</label><input id="hrpAcct" placeholder="12345678" autocomplete="off"><label>Emergency contact name</label><input id="hrpEmerName" placeholder="Full name" autocomplete="off"><label>Emergency contact phone</label><input id="hrpEmerPhone" placeholder="07…" autocomplete="off"><label style="display:flex;align-items:flex-start;gap:8px;font-weight:400;margin-top:8px"><input type="checkbox" id="hrpRtw" style="margin-top:3px"><span>I confirm I have the right to work in the UK</span></label><div class="mod-btns"><button class="cc" onclick="closeHrPortal()">Cancel</button><button class="ss" onclick="submitHrPortal()">Submit checklist</button></div></div></div>
+<!-- Training / IT setup (shared checklist modal) -->
+<div class="mo" id="chk"><div class="mod"><h3 id="chkTitle">Training</h3><p style="font-size:12px;color:#605e5c;margin:0 0 12px;line-height:1.5" id="chkSub">Simulation only — mark each required module once you have read it.</p><div id="chkDone" style="display:none;font-size:13px;color:#047857;margin-bottom:10px">Already submitted.</div><div id="chkItems"></div><div class="mod-btns"><button class="cc" onclick="closeChecklist()">Cancel</button><button class="ss" onclick="submitChecklist()">Mark complete</button></div></div></div>
+<!-- Files / SharePoint stub -->
+<div class="mo" id="fls"><div class="mod"><h3>Files</h3><p style="font-size:12px;color:#605e5c;margin:0 0 12px;line-height:1.5">In-sim folder — saving here is the evidence your manager can see.</p><div id="flsDone" style="font-size:12px;color:#047857;margin-bottom:10px"></div><label>Folder</label><input id="flsFolder" placeholder="SharePoint/Audit/2026/Q1" autocomplete="off"><label>Filename</label><input id="flsName" placeholder="bank-rec-q1.pdf" autocomplete="off"><div class="mod-btns"><button class="cc" onclick="closeFiles()">Cancel</button><button class="ss" onclick="submitFiles()">Save</button></div></div></div>
+<!-- Attachment viewer -->
+<div class="mo" id="att"><div class="mod"><h3 id="attTitle">Attachment</h3><div id="attBody" style="font-size:13px;line-height:1.55;white-space:pre-wrap;color:#201f1e;max-height:360px;overflow:auto;margin:0 0 12px"></div><div class="mod-btns"><button class="ss" onclick="closeAtt()">Close</button></div></div></div>
+<!-- CI status -->
+<div class="mo" id="cip"><div class="mod"><h3 id="ciTitle">CI status</h3><p id="ciSum" style="font-size:12px;color:#605e5c;margin:0 0 12px;line-height:1.5"></p><div id="ciRuns"></div><div class="mod-btns"><button class="ss" onclick="closeCiPanel()">Close</button></div></div></div>
 <!-- End-of-day Modal -->
 <div class="mo" id="eod"><div class="eod-mod"><h2>End of Day</h2><div class="eod-sub" id="eodSub">Performance review</div><div class="eod-score"><div class="num" id="eodNum">0</div><div class="out">/ 100</div><span class="eod-grade" id="eodGrade" style="display:none"></span></div><div class="eod-level" id="eodLvl">In progress</div><div class="eod-meta" id="eodMeta"></div><div class="eod-dims" id="eodDims"></div><div class="eod-bd" id="eodBd"></div><div class="eod-notes" id="eodNotes" style="display:none"><h4>Manager Notes</h4><ul id="eodNotesList"></ul></div><div class="eod-actions"><button class="sec" onclick="ceod()">Close</button><button class="sec" onclick="bh()">Try Another Role</button><button class="pri" id="eodNextDayBtn" onclick="startNextDay()" style="display:none">Continue to Day 2 →</button></div></div></div>
 <!-- Loading Overlay -->
@@ -1694,7 +1702,8 @@ const ICONS={
   siem:'<svg viewBox="0 0 24 24"><path d="M12 3.5 4.5 6.2v5.6c0 4.3 3.2 8.2 7.5 8.7 4.3-.5 7.5-4.4 7.5-8.7V6.2L12 3.5z"/><path d="m9.5 12 2 2 3.5-4"/></svg>',
   campaigns:'<svg viewBox="0 0 24 24"><path d="M3.5 10.5v3l11 5V5.5l-11 5z"/><path d="M14.5 8v8"/><path d="M18 9.5l3-1.5v8l-3-1.5"/><path d="M7 14v3.5"/></svg>',
   jira:'<svg viewBox="0 0 24 24"><path d="m9 17-5-5 5-5"/><path d="m15 7 5 5-5 5"/></svg>',
-  hr:'<svg viewBox="0 0 24 24"><rect x="5" y="3.5" width="14" height="17" rx="2"/><path d="M8 8h8M8 12h8M8 16h5"/></svg>'
+  hr:'<svg viewBox="0 0 24 24"><rect x="5" y="3.5" width="14" height="17" rx="2"/><path d="M8 8h8M8 12h8M8 16h5"/></svg>',
+  learn:'<svg viewBox="0 0 24 24"><path d="M4 19V6.5c0-.8.7-1.5 1.6-1.5H12v14H5.6C4.7 19 4 19.7 4 20.5"/><path d="M12 5h6.4c.9 0 1.6.7 1.6 1.5V19"/><path d="M12 19h6.4c.9 0 1.6.7 1.6 1.5"/></svg>'
 };
 function setIcon(el,name){const s=ICONS[name];if(el&&s)el.innerHTML=s}
 function mdStrip(text){return String(text||'').replace(/`([^`]+)`/g,'$1').replace(/\*\*([^*]+)\*\*/g,'$1').replace(/(^|[\s(])\*([^*]+)\*/g,'$1$2').replace(/\[([^\]]+)\]\((?:https?:\/\/[^\s)]+|firstdesk:\/\/[^\s)]+)\)/g,'$1')}
@@ -1726,6 +1735,12 @@ function mdRender(text){
   s=s.replace(/(^|[\s(])\*([^*\n]+)\*(?=[\s).,!?:;]|$)/g,'$1<em>$2</em>');
   // links [t](firstdesk://hr-onboarding) — in-sim HR portal
   s=s.replace(/\[([^\]]+)\]\(firstdesk:\/\/hr-onboarding\)/g,'<a href="#" class="hr-portal-link" onclick="event.preventDefault();openHrPortal()">$1</a>');
+  s=s.replace(/\[([^\]]+)\]\(firstdesk:\/\/training\)/g,'<a href="#" class="hr-portal-link" onclick="event.preventDefault();openChecklist(\'training\')">$1</a>');
+  s=s.replace(/\[([^\]]+)\]\(firstdesk:\/\/it-setup\)/g,'<a href="#" class="hr-portal-link" onclick="event.preventDefault();openChecklist(\'it_setup\')">$1</a>');
+  s=s.replace(/\[([^\]]+)\]\(firstdesk:\/\/files\)/g,'<a href="#" class="hr-portal-link" onclick="event.preventDefault();openFiles()">$1</a>');
+  s=s.replace(/\[([^\]]+)\]\(firstdesk:\/\/ci\)/g,'<a href="#" class="hr-portal-link" onclick="event.preventDefault();openCiPanel()">$1</a>');
+  s=s.replace(/\[([^\]]+)\]\(firstdesk:\/\/meeting\)/g,'<a href="#" class="hr-portal-link" onclick="event.preventDefault();openMeeting()">$1</a>');
+  s=s.replace(/\[([^\]]+)\]\(firstdesk:\/\/jira\/([^)]+)\)/g,'<a href="#" class="hr-portal-link" onclick="event.preventDefault();ojum(\'$2\')">$1</a>');
   // links [t](https://…)
   s=s.replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g,'<a href="$2" target="_blank" rel="noreferrer noopener">$1</a>');
   // bullets at line start
@@ -1829,9 +1844,16 @@ const palette=(d&&d.tools)||[];
 const extras=palette.filter(t=>!['outlook','tasks','slack', tm?tm.icon:null].includes(t));
 const extraIconMap={sheets:{icon:'tasks',name:'Sheets',tint:'#0F9D58'},jira:{icon:'jira',name:'Jira',tint:'#F59E0B'},analytics:{icon:'campaigns',name:'Analytics',tint:'#0EA5E9'},ci:{icon:'jira',name:'CI/CD',tint:'#10B981'}};
 let extraHtml='';
-if(tm){extras.forEach(t=>{const e=extraIconMap[t]||{icon:'tasks',name:t,tint:'#71717A'};const tab=(EXTRA_TAB[career]||{})[t]||PRIMARY_TAB[career];extraHtml+=`<div class="di" title="${t}" onclick="openToolTab('${tab}')"><div class="di-img" style="--tint:${e.tint}">${ICONS[e.icon]}</div><div class="di-lbl">${e.name}</div></div>`;});}
+if(tm){
+extras.forEach(t=>{
+  const e=extraIconMap[t]||{icon:'tasks',name:t,tint:'#71717A'};
+  if(t==='ci'){extraHtml+=`<div class="di" title="CI" onclick="openCiPanel()"><div class="di-img" style="--tint:${e.tint}">${ICONS[e.icon]||ICONS.jira}</div><div class="di-lbl">CI</div></div>`;return}
+  const tab=(EXTRA_TAB[career]||{})[t]||PRIMARY_TAB[career];
+  extraHtml+=`<div class="di" title="${t}" onclick="openToolTab('${tab}')"><div class="di-img" style="--tint:${e.tint}">${ICONS[e.icon]}</div><div class="di-lbl">${e.name}</div></div>`;
+});
+}
 const primaryHtml=tm?`<div class="di" onclick="openToolTab('${PRIMARY_TAB[career]}')"><div class="di-img" style="--tint:${tm.tint}">${ICONS[tm.icon]}</div><div class="di-lbl">${tm.name}</div></div>`:'';
-icons.innerHTML=`<div class="di" onclick="tw('outlook')"><div class="di-img" style="--tint:#2563EB">${ICONS.outlook}</div><div class="di-lbl">Outlook</div></div>`+primaryHtml+`<div class="di" onclick="openHrPortal()"><div class="di-img" style="--tint:#0F766E">${ICONS.hr}</div><div class="di-lbl">HR Portal</div></div><div class="di" onclick="tw('tasks')"><div class="di-img" style="--tint:#6366F1">${ICONS.tasks}</div><div class="di-lbl">Tasks</div></div><div class="di" onclick="tw('chat')"><div class="di-img" style="--tint:#0F766E">${ICONS.slack}</div><div class="di-lbl">Slack</div></div>`+extraHtml;
+icons.innerHTML=`<div class="di" onclick="tw('outlook')"><div class="di-img" style="--tint:#2563EB">${ICONS.outlook}</div><div class="di-lbl">Outlook</div></div>`+primaryHtml+`<div class="di" onclick="openHrPortal()"><div class="di-img" style="--tint:#0F766E">${ICONS.hr}</div><div class="di-lbl">HR Portal</div></div><div class="di" onclick="openChecklist('training')"><div class="di-img" style="--tint:#7C3AED">${ICONS.learn}</div><div class="di-lbl">Learning</div></div><div class="di" onclick="tw('tasks')"><div class="di-img" style="--tint:#6366F1">${ICONS.tasks}</div><div class="di-lbl">Tasks</div></div><div class="di" onclick="tw('chat')"><div class="di-img" style="--tint:#0F766E">${ICONS.slack}</div><div class="di-lbl">Slack</div></div>`+extraHtml;
 document.getElementById('toolTitle').textContent=tm?tm.name:'Tool';
 document.getElementById('toolName').textContent=tm?tm.name:'Tool';
 document.getElementById('tbTool').style.display=tm?'':'none';
@@ -2050,7 +2072,7 @@ function _syncMeetings(list){
   }
 }
 async function openMeeting(){
-  if(!_mtg)return;
+  if(!_mtg){toast('No meeting is on the clock right now.','info');return;}
   if(_mtg.state!=='open'){
     toast(_mtg.state==='missed'?'That meeting is over.':'Not started yet — '+_mtg.title+' at '+_mtg.sim_time,'info');
     return;
@@ -2546,7 +2568,7 @@ function olForward(){
   toast('Forwarding — fill in the recipient','info');
 }
 async function li(){const l=document.getElementById('mlist');if(l&&!l.dataset.loaded)l.innerHTML=skeletonRows(6);try{const d=await api.get('/api/inbox',{silent:true});if(l)l.dataset.loaded='1';l.innerHTML='';let u=0;if(!d.emails||!d.emails.length){l.innerHTML='<div class="empty"><div class="ico">📭</div><div class="t">Inbox zero</div><div class="s">No new mail. Coworkers will reach out as the day unfolds.</div></div>';document.getElementById('mc').textContent='0';document.getElementById('tmc').textContent='0';return}d.emails.forEach(e=>{if(!e.read)u++;const rp=e.replied?'<span style="color:#107c10;font-size:10px;font-weight:700;margin-left:4px">✓ Replied</span>':'';const isCC=e.category==='agent_comm'?'<span style="color:#5c2d91;font-size:9px;background:#f3e8ff;padding:1px 5px;border-radius:3px;margin-left:4px;font-weight:600">CC</span>':'';const initials=esc(avi(e.from_name));const color=avc(e.from_name);l.innerHTML+=`<div class="mi ${e.read?'':'ur'}" onclick="om('${e.id}')"><div class="mav" style="background:${color}">${initials}</div><div class="mibody"><div class="mih"><div class="mif">${esc(e.from_name)}${isCC}</div><div class="mit">${e.time||''}</div></div><div class="mis"><span class="pr ${e.priority}"></span>${esc(e.subject)}${rp}</div><div class="mip">${esc(mdStrip(e.body||'').substring(0,90))}...</div></div></div>`});document.getElementById('mc').textContent=u;document.getElementById('tmc').textContent=u}catch(e){console.error(e)}}
-async function om(id){const r=await fetch(A+'/api/inbox');const d=await r.json();ce=d.emails.find(e=>e.id===id);if(!ce)return;document.getElementById('mlist').style.display='none';document.getElementById('mdet').classList.add('on');document.getElementById('dsubj').textContent=ce.subject;const av=document.getElementById('davatar');av.textContent=avi(ce.from_name);av.style.background=avc(ce.from_name);const role=ce.from_role?` · ${ce.from_role}`:'';document.getElementById('dmeta').innerHTML=`<b>${esc(ce.from_name)}</b>${esc(role)}<br><span style="color:#605e5c">To: Me · ${esc(ce.time||'')}</span>`;document.getElementById('dbody').innerHTML=mdRender(ce.body);const _dra=document.getElementById('dra');_dra.style.display='flex';_dra.classList.remove('expanded');const _cb=document.getElementById('mraCollapseBtn');if(_cb)_cb.style.display='none';_fillReply(ce);try{await fetch(A+'/api/email/'+id+'/read',{method:'POST'})}catch(e){}}
+async function om(id){const r=await fetch(A+'/api/inbox');const d=await r.json();ce=d.emails.find(e=>e.id===id);if(!ce)return;document.getElementById('mlist').style.display='none';document.getElementById('mdet').classList.add('on');document.getElementById('dsubj').textContent=ce.subject;const av=document.getElementById('davatar');av.textContent=avi(ce.from_name);av.style.background=avc(ce.from_name);const role=ce.from_role?` · ${ce.from_role}`:'';document.getElementById('dmeta').innerHTML=`<b>${esc(ce.from_name)}</b>${esc(role)}<br><span style="color:#605e5c">To: Me · ${esc(ce.time||'')}</span>`;document.getElementById('dbody').innerHTML=mdRender(ce.body)+_attHtml(ce);const _dra=document.getElementById('dra');_dra.style.display='flex';_dra.classList.remove('expanded');const _cb=document.getElementById('mraCollapseBtn');if(_cb)_cb.style.display='none';_fillReply(ce);try{await fetch(A+'/api/email/'+id+'/read',{method:'POST'})}catch(e){}}
 function _fillReply(e){const toEl=document.getElementById('rTo');if(toEl){const em=e.from_email||(e.from_name?e.from_name.toLowerCase().replace(/\s+/g,'.')+'@company.com':'');toEl.innerHTML='<span class="mra-chip"><span class="av" style="background:'+avc(e.from_name)+'">'+esc(avi(e.from_name))+'</span><span class="nm">'+esc(e.from_name||'Recipient')+'</span><span class="em">&lt;'+esc(em)+'&gt;</span></span>'}const subEl=document.getElementById('rSubj');if(subEl){const s=String(e.subject||'');subEl.value=s.startsWith('Re: ')?s:('Re: '+s)}const ccRow=document.getElementById('rCcRow');const bccRow=document.getElementById('rBccRow');if(ccRow)ccRow.style.display='none';if(bccRow)bccRow.style.display='none';document.querySelectorAll('.mra-toggles .mra-add').forEach(el=>el.classList.remove('on'));const rcc=document.getElementById('rCc');if(rcc)rcc.value='';const rbcc=document.getElementById('rBcc');if(rbcc)rbcc.value='';const sig=document.getElementById('rSig');const meName=(currentUser&&currentUser.name)||'You';const meRole=_careerRoleLabel(cc);const meOrg=_careerOrgLabel(cc);const initials=avi(meName);if(sig)sig.innerHTML='<b>'+esc(meName)+'</b><span class="ttl">'+esc(meRole)+'</span><div class="org">'+esc(meOrg)+'</div>';const meEl=document.getElementById('rMe');if(meEl)meEl.textContent=meName}
 function _careerRoleLabel(career){const map={accountant:'Junior Accountant',cybersecurity:'SOC Analyst',marketing:'Marketing Associate',developer:'Junior Developer',procurement:'Procurement Analyst',hr:'L&D Specialist',pm:'Growth Product Manager'};return map[career]||'Team Member'}
 function _careerOrgLabel(career){const map={accountant:'Apex Financial',cybersecurity:'ShieldWall Security',marketing:'BrightPath',developer:'CodeCraft Labs',procurement:'TechStack Procurement Ltd',hr:'Helix People Co.',pm:'Northwind Cloud',grc:'Halcyon Health'};return map[career]||'FirstDesk'}
@@ -2706,6 +2728,84 @@ async function submitHrPortal(){
     toast('HR checklist submitted — Diane has a confirmation','success');
     try{li()}catch(e){}
     try{if(window.loadSlack)window.loadSlack()}catch(e){}
+  }catch(e){}
+}
+let _chkKind='training';
+function closeChecklist(){document.getElementById('chk').classList.remove('on');closeModalA11y('chk')}
+async function openChecklist(kind){
+  _chkKind=kind||'training';
+  const m=document.getElementById('chk');if(!m)return;
+  m.classList.add('on');openModalA11y('chk');
+  document.getElementById('chkTitle').textContent=_chkKind==='it_setup'?'IT setup':'Training';
+  document.getElementById('chkSub').textContent=_chkKind==='it_setup'?'Simulation only — confirm each setup step. This is the evidence your manager can see.':'Simulation only — mark each required module. This is the evidence your manager can see.';
+  const done=document.getElementById('chkDone');
+  const box=document.getElementById('chkItems');
+  box.innerHTML='Loading…';
+  try{
+    const d=await api.get('/api/checklist/'+_chkKind,{silent:true});
+    if(done)done.style.display=d&&d.submitted?'block':'none';
+    const items=d.items||[];
+    const already=new Set(d.completed_ids||[]);
+    if(!items.length){box.innerHTML='<p style="font-size:13px;color:#605e5c">No required items for this role.</p>';return}
+    box.innerHTML=items.map(it=>'<label style="display:flex;align-items:flex-start;gap:8px;font-weight:400;margin:8px 0"><input type="checkbox" class="chkItem" data-id="'+esc(it.id)+'" '+(already.has(it.id)||d.submitted?'checked':'')+' style="margin-top:3px"><span>'+esc(it.title)+'</span></label>').join('');
+  }catch(e){box.innerHTML='<p style="color:#a4262c">Could not load checklist.</p>'}
+}
+async function submitChecklist(){
+  const ids=Array.from(document.querySelectorAll('#chkItems .chkItem:checked')).map(el=>el.getAttribute('data-id')).filter(Boolean);
+  try{
+    await api.post('/api/checklist/'+_chkKind,{completed_ids:ids});
+    closeChecklist();
+    toast((_chkKind==='it_setup'?'IT setup':'Training')+' submitted','success');
+    try{if(window.loadSlack)window.loadSlack()}catch(e){}
+  }catch(e){}
+}
+function closeFiles(){document.getElementById('fls').classList.remove('on');closeModalA11y('fls')}
+async function openFiles(){
+  const m=document.getElementById('fls');if(!m)return;
+  m.classList.add('on');openModalA11y('fls');
+  try{
+    const d=await api.get('/api/files',{silent:true});
+    document.getElementById('flsFolder').value=d.default_folder||'';
+    document.getElementById('flsName').value=d.default_filename||'note.md';
+    const saves=d.saves||[];
+    document.getElementById('flsDone').textContent=saves.length?('Saved: '+saves.map(s=>s.folder+'/'+s.filename).join(', ')):'';
+  }catch(e){}
+}
+async function submitFiles(){
+  const folder=document.getElementById('flsFolder').value.trim();
+  const filename=document.getElementById('flsName').value.trim();
+  if(!folder||!filename){toast('Folder and filename required','error');return}
+  try{
+    await api.post('/api/files',{folder:folder,filename:filename});
+    closeFiles();
+    toast('Saved '+filename+' to '+folder,'success');
+  }catch(e){}
+}
+function closeAtt(){document.getElementById('att').classList.remove('on');closeModalA11y('att')}
+function _attHtml(e){
+  const atts=e&&e.attachments||[];
+  if(!atts.length)return '';
+  return '<div style="margin-top:14px;padding-top:12px;border-top:1px solid #edebe9">'+atts.map(function(a,i){
+    return '<button type="button" class="ss" style="margin:0 8px 8px 0" onclick="openAtt('+i+')">📎 '+esc(a.title||'Attachment')+'</button>';
+  }).join('')+'</div>';
+}
+async function openAtt(i){
+  const a=(ce&&ce.attachments||[])[i];if(!a)return;
+  document.getElementById('attTitle').textContent=a.title||'Attachment';
+  document.getElementById('attBody').textContent=a.body||'';
+  document.getElementById('att').classList.add('on');openModalA11y('att');
+  if(a.id){try{await api.post('/api/attachments/'+encodeURIComponent(a.id)+'/view',{},{silent:true})}catch(e){}}
+}
+function closeCiPanel(){document.getElementById('cip').classList.remove('on');closeModalA11y('cip')}
+async function openCiPanel(){
+  const m=document.getElementById('cip');if(!m)return;
+  m.classList.add('on');openModalA11y('cip');
+  try{
+    const d=await api.get('/api/ci',{silent:true});
+    document.getElementById('ciTitle').textContent=(d.title||'CI')+' · #'+(d.run||'');
+    document.getElementById('ciSum').textContent=d.summary||'';
+    const runs=d.runs||[];
+    document.getElementById('ciRuns').innerHTML='<table style="width:100%;font-size:12px;border-collapse:collapse">'+(runs.map(r=>'<tr><td style="padding:4px 0">#'+r.id+'</td><td style="padding:4px 0;color:'+(r.result==='fail'?'#a4262c':'#0e7a0d')+'">'+(r.result||'')+'</td><td style="padding:4px 0;color:#605e5c">'+esc(r.note||'')+'</td></tr>').join(''))+'</table>';
   }catch(e){}
 }
 // Open the legacy #w-tool window (always show, no toggle), switch to a tab,
@@ -3372,7 +3472,7 @@ function ocd(id){
 }
 // Tasks
 async function lt(){const l=document.getElementById('tlist');if(l&&!l.dataset.loaded)l.innerHTML=skeletonRows(4);let d;try{d=await api.get('/api/tasks',{silent:true})}catch(e){if(l)l.innerHTML='<div class="empty"><div class="ico">⚠️</div><div class="t">Couldn\'t load tasks</div><div class="s">'+esc(e.message)+'</div></div>';return}if(l)l.dataset.loaded='1';l.innerHTML='';if(!d.tasks||!d.tasks.length){l.innerHTML='<div class="empty"><div class="ico">📋</div><div class="t">No tasks yet</div><div class="s">Your manager will assign work shortly. Stay sharp.</div></div>';return}d.tasks.forEach(t=>{const dn=t.status==='done';const rs=t.review_status||'';let badge='';if(rs==='approved')badge='<span class="tg low" style="background:#1a5e1f;color:#fff">✓ Manager approved</span>';else if(rs==='pending_review')badge='<span class="tg low" style="background:#b87900;color:#fff">⏳ Awaiting manager review</span>';else if(rs==='needs_rework')badge='<span class="tg low" style="background:#a3340c;color:#fff">↩ Rework requested</span>';else if(rs==='rejected')badge='<span class="tg low" style="background:#7a0e0e;color:#fff">✗ Rejected</span>';const aw=t.awarded_points!=null?`<span class="tg low">+${t.awarded_points}/${t.points}pts</span>`:`<span class="tg low">${t.points}pts</span>`;l.innerHTML+=`<div class="tr"><div class="tc ${dn?'done':''}" onclick="dt('${t.id}')">${dn?'✓':''}</div><div><div class="tt ${dn?'done':''}">${esc(t.title)}</div><div class="td">${esc(t.description)}</div><div class="tgs"><span class="tg ${t.priority}">${t.priority}</span><span class="tg low">Due: ${t.deadline}</span>${aw}${badge}</div></div></div>`})}
-async function dt(id){try{const j=await api.post('/api/task/'+id+'/complete',null,{silent:true});const msg=j.completion_credit?('+'+j.completion_credit+'pts — awaiting manager review'):'Task marked complete';toast(msg,'success');lt();uc();sm('I just marked task '+id+' as complete. Please review my work.')}catch(e){if(e&&e.code==='hr_portal_required'){toast(e.message||'Submit the HR portal checklist first','error');openHrPortal();return}await sm('I completed task '+id);lt()}}
+async function dt(id){try{const j=await api.post('/api/task/'+id+'/complete',null,{silent:true});const msg=j.completion_credit?('+'+j.completion_credit+'pts — awaiting manager review'):'Task marked complete';toast(msg,'success');lt();uc();sm('I just marked task '+id+' as complete. Please review my work.')}catch(e){if(e&&e.code==='hr_portal_required'){toast(e.message||'Submit the HR portal checklist first','error');openHrPortal();return}if(e&&e.code==='training_required'){toast(e.message||'Complete training first','error');openChecklist('training');return}if(e&&e.code==='it_setup_required'){toast(e.message||'Complete IT setup first','error');openChecklist('it_setup');return}if(e&&e.code==='files_required'){toast(e.message||'Save the file first','error');openFiles();return}if(e&&e.code==='jira_evidence_required'){toast(e.message||'Add a comment on COMP-014 first','error');ojum('COMP-014');return}if(e&&e.code==='attachment_required'){toast(e.message||'Open the email attachment first','error');tw('outlook');return}await sm('I completed task '+id);lt()}}
 // Chat
 async function sc(){const i=document.getElementById('cin');const m=i.value.trim();if(!m)return;i.value='';await sm(m)}
 function nowt(){const d=new Date();let h=d.getHours();const m=String(d.getMinutes()).padStart(2,'0');const ap=h>=12?'PM':'AM';h=h%12||12;return h+':'+m+' '+ap}
@@ -3443,6 +3543,10 @@ window.addEventListener('DOMContentLoaded',()=>{
   registerModal('ivm',civm);
   registerModal('jum',cjum);
   registerModal('hrp',closeHrPortal);
+  registerModal('chk',closeChecklist);
+  registerModal('fls',closeFiles);
+  registerModal('att',closeAtt);
+  registerModal('cip',closeCiPanel);
   registerModal('sd',csd);
   registerModal('jd',cjd);
   registerModal('cum',ccum);

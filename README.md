@@ -4,7 +4,8 @@ AI-driven workplace simulator. Practise a real first day in a job — Outlook, S
 
 ## Stack
 - FastAPI + Pydantic v2
-- LangGraph multi-agent supervisor over Fireworks DeepSeek
+- LangChain + LangGraph multi-agent supervisor over Fireworks DeepSeek
+- LangSmith tracing (optional — set `LANGSMITH_API_KEY`)
 - MongoDB Atlas
 - Single-file frontend (vanilla JS)
 
@@ -24,7 +25,12 @@ Then open http://localhost:8000.
 | `MONGO_URI` | MongoDB Atlas connection string |
 | `FIREWORKS_API_KEY` | LLM provider |
 
-Optional: `LANGCHAIN_API_KEY`, `HUME_API_KEY`, `ADMIN_TOKEN`, `STRICT_ENV=1` (fail fast).
+Optional: `LANGSMITH_API_KEY` (traces LLM runs at https://smith.langchain.com), `HUME_API_KEY`, `ADMIN_TOKEN`, `STRICT_ENV=1` (fail fast).
+
+## LangChain / LangSmith CLI and MCP
+- CLI: `langsmith` (Homebrew `langchain-ai/tap/langsmith-cli`) and `langchain` (`uv tool install langchain-cli`). Auth: `LANGSMITH_API_KEY` in `.env`, or `langsmith auth login`.
+- Cursor MCP: project `.cursor/mcp.json` — **langsmith** (stdio via `scripts/langsmith-mcp.sh`, reads `.env`) and **langchain-docs** (`https://docs.langchain.com/mcp`). Reload MCP in Cursor after this change.
+- FirstDesk workplace agents do **not** call MCP. Their tools stay the in-sim set (inbox, tasks, SIEM, …). MCP here is for Cursor / CLI only.
 
 ## Production checklist
 - Set `STRICT_ENV=1`
