@@ -76,7 +76,7 @@ def main():
         "name": "GRC WB", "email": email, "password": "testpass123", "consent": True}).json()["token"]
     H = {"Authorization": f"Bearer {tok}"}
     r = requests.post(f"{base}/api/start", headers=H, timeout=200,
-                      json={"career": "grc", "experience_level": "studied"})
+                      json={"career": "grc", "experience_level": "studied", "reset": True})
     if r.status_code != 200:
         print(f"PREREQ — /api/start failed: {r.status_code} {r.text[:200]}")
         return 2

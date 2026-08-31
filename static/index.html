@@ -141,6 +141,7 @@ button{cursor:pointer}
 .career-card .where{font-size:12px;color:#71717a;letter-spacing:-0.005em;margin-top:-6px}
 .career-card .desc{color:#a1a1aa;font-size:13px;line-height:1.55;letter-spacing:-0.005em;flex:1;padding-top:4px}
 .career-card .go{font-size:12px;color:#71717a;font-weight:500;display:flex;align-items:center;gap:6px;transition:color .15s;letter-spacing:-0.005em}
+.career-card.resume .go{color:#7dd3fc}
 .career-card:hover .go{color:#fafaf9}
 .career-card .go .arr{transition:transform .15s;display:inline-block}
 .career-card:hover .go .arr{transform:translateX(4px)}
@@ -164,6 +165,9 @@ button{cursor:pointer}
 .dash-actions{margin-top:14px;display:flex;justify-content:flex-end}
 .dash-link{background:transparent;border:0;color:#71717a;font-size:11.5px;cursor:pointer;text-decoration:underline;font-family:inherit}
 .dash-link:hover{color:#fca5a5}
+.dash-continue{margin:0 0 14px}
+.dash-cta{width:100%;background:linear-gradient(180deg,#38bdf8,#0284c7);color:#fff;border:0;border-radius:10px;padding:12px 16px;font:inherit;font-size:14px;font-weight:600;cursor:pointer;letter-spacing:-0.01em}
+.dash-cta:hover{filter:brightness(1.08)}
 .guest-cta{display:flex;justify-content:space-between;align-items:center;padding:10px 14px;background:rgba(245,158,11,0.08);border:1px solid rgba(245,158,11,0.20);border-radius:8px;font-size:12.5px;color:#fcd34d;margin-bottom:14px}
 .guest-cta-btn{background:#f59e0b;color:#0a0a0c;border:0;padding:6px 12px;border-radius:6px;font-size:11.5px;font-weight:600;cursor:pointer;font-family:inherit}
 .guest-cta-btn:hover{background:#fbbf24}
@@ -362,6 +366,14 @@ button{cursor:pointer}
 .di:hover .di-img{transform:translateY(-2px) scale(1.02)}
 .di-img svg{width:28px;height:28px;stroke:#fff;fill:none;filter:drop-shadow(0 1px 0 rgba(0,0,0,0.18))}
 .di-lbl{font-size:11px;font-weight:500;color:#fff;text-align:center;text-shadow:0 1px 2px rgba(0,0,0,0.55);line-height:1.25;letter-spacing:-0.005em;max-width:84px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;word-break:break-word}
+.di.pulse{background:rgba(37,99,235,0.22);box-shadow:0 0 0 2px rgba(96,165,250,0.55)}
+.di.pulse .di-img{animation:fmcPulse 1.6s ease-in-out infinite}
+@keyframes fmcPulse{0%,100%{transform:none}50%{transform:translateY(-3px) scale(1.04)}}
+.first-min-coach{position:absolute;left:110px;top:28px;z-index:40;width:340px;background:rgba(12,14,20,0.92);border:1px solid rgba(255,255,255,0.12);border-radius:14px;padding:16px 16px 14px;box-shadow:0 18px 40px -12px rgba(0,0,0,0.55);backdrop-filter:blur(12px);color:#e8e6e3}
+.first-min-coach .fmc-kicker{font-size:10px;letter-spacing:0.12em;text-transform:uppercase;color:#7dd3fc;margin-bottom:6px;font-weight:600}
+.first-min-coach .fmc-title{font-size:16px;font-weight:600;letter-spacing:-0.02em;margin-bottom:6px}
+.first-min-coach .fmc-body{font-size:13px;line-height:1.5;color:#a1a1aa;margin-bottom:12px}
+.first-min-coach button{background:#2563EB;color:#fff;border:0;border-radius:8px;padding:8px 12px;font:inherit;font-size:12.5px;font-weight:600;cursor:pointer}
 /* Windows — macOS Sonoma material */
 .window{position:absolute;background:rgba(252,252,254,0.96);-webkit-backdrop-filter:saturate(180%) blur(28px);backdrop-filter:saturate(180%) blur(28px);border-radius:11px;box-shadow:0 0 0 0.5px rgba(0,0,0,0.16),0 1px 2px rgba(0,0,0,0.04),0 14px 32px -10px rgba(0,0,0,0.22),0 36px 80px -22px rgba(0,0,0,0.36);display:none;overflow:hidden;min-width:380px;min-height:240px;max-height:calc(100vh - 56px - 32px);max-width:calc(100vw - 32px)}
 .window.active{display:flex;flex-direction:column;animation:winIn .22s var(--ease-out)}
@@ -1363,11 +1375,40 @@ button{cursor:pointer}
 <div class="lvl-foot"><button type="button" class="cc" onclick="cancelLevel()">Cancel</button></div>
 </div>
 </div>
+<div class="lvl-overlay" id="resumeSelect" style="display:none">
+<div class="lvl-card">
+<div class="lvl-head">
+  <h2 id="resumeTitle">Continue your desk?</h2>
+  <p id="resumeSub">Starting again wipes this run. Continue if you already began today.</p>
+</div>
+<div class="lvl-grid">
+<button type="button" class="lvl-pick" onclick="confirmResume()">
+<div class="lvl-emoji">▶</div>
+<div class="lvl-title">Continue</div>
+<div class="lvl-badge easy">Keep progress</div>
+<div class="lvl-desc" id="resumeDesc">Pick up where you left off. Same inbox, same alerts, same day.</div>
+</button>
+<button type="button" class="lvl-pick" onclick="confirmStartOver()">
+<div class="lvl-emoji">↺</div>
+<div class="lvl-title">Start over</div>
+<div class="lvl-badge hard">Wipes this run</div>
+<div class="lvl-desc">New day 1. Use this only if you meant to pick a different difficulty.</div>
+</button>
+</div>
+<div class="lvl-foot"><button type="button" class="cc" onclick="cancelResume()">Cancel</button></div>
+</div>
+</div>
 </div><!-- /simStage -->
 </div>
 <!-- DESKTOP -->
 <div class="desktop" id="desktop">
 <div class="desktop-icons" id="desktopIcons"></div>
+<div class="first-min-coach" id="firstMinCoach" style="display:none">
+<div class="fmc-kicker">Start here</div>
+<div class="fmc-title" id="fmcTitle">Your manager emailed you.</div>
+<div class="fmc-body" id="fmcBody">Open the unread HIGH message in Outlook. That is the next action — not Slack, not restarting.</div>
+<button type="button" onclick="dismissFirstMinCoach()">Got it — I'm in Outlook</button>
+</div>
 <div class="window" id="w-outlook" style="width:900px;height:740px;top:24px;left:160px">
 <div class="wh" onmousedown="sd(event,'w-outlook')"><div class="wd"><div class="wdot c" onclick="cw('outlook')"></div><div class="wdot m" onclick="mw(this)" title="Minimize"></div><div class="wdot x" onclick="xw(this)" title="Zoom"></div></div><div class="wt" id="outlookTitle">Outlook — Inbox</div></div>
 <div class="wb"><div class="ol"><div class="ol-rib"><div class="ol-logo">📧 Outlook</div><div class="ol-search" style="display:flex;align-items:center;gap:6px;padding:3px 10px"><span>🔍</span><input id="olSearch" placeholder="Search mail and people" oninput="olSearchInput()" style="background:transparent;border:0;outline:0;color:#fff;font:inherit;width:100%;min-width:200px"></div><div style="margin-left:auto;display:flex;gap:8px;align-items:center;font-size:11px;opacity:0.9"><span style="cursor:pointer" title="Settings" onclick="toast('Settings not available in simulation','info')">⚙️</span><span style="cursor:pointer" title="Help" onclick="toast('Help — try clicking the folders on the left, replying to mail, and using New mail','info')">❓</span><span id="olMeAv" style="background:#fff;color:#0078d4;width:24px;height:24px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:700;cursor:pointer" title="Your account" onclick="toast(((currentUser&&currentUser.name)||'You')+' · signed in','info')">U</span></div></div><div class="ol-tools"><div class="ol-tool new" onclick="olNewMail()">✉ New mail</div><div class="ol-tool" onclick="olRefreshClick()">↻ Refresh</div><div class="ol-tool" onclick="olDelete()">🗑 Delete</div><div class="ol-tool" onclick="olArchive()">📁 Archive</div><div class="ol-tool" onclick="olReplyBtn()">↩ Reply</div><div class="ol-tool" onclick="olForward()">↪ Forward</div></div><div class="ol-body"><div class="ms"><div class="ms-head">Favorites</div><div class="mf on" data-folder="inbox" onclick="olFolder('inbox')"><span><span class="ic">📥</span>Inbox</span><span id="mc" style="background:#0078d4;color:#fff;font-size:10px;padding:1px 7px;border-radius:10px;font-weight:600">0</span></div><div class="mf" data-folder="sent" onclick="olFolder('sent')"><span><span class="ic">📤</span>Sent Items</span><span id="olSentCount" style="background:#605e5c;color:#fff;font-size:10px;padding:1px 7px;border-radius:10px;font-weight:600;display:none">0</span></div><div class="mf" data-folder="drafts" onclick="olFolder('drafts')"><span><span class="ic">📝</span>Drafts</span><span id="olDraftsCount" style="background:#605e5c;color:#fff;font-size:10px;padding:1px 7px;border-radius:10px;font-weight:600;display:none">0</span></div><div class="mf" data-folder="junk" onclick="olFolder('junk')"><span><span class="ic">⚠️</span>Junk Email</span></div><div class="mf" data-folder="deleted" onclick="olFolder('deleted')"><span><span class="ic">🗑️</span>Deleted Items</span><span id="olDelCount" style="background:#605e5c;color:#fff;font-size:10px;padding:1px 7px;border-radius:10px;font-weight:600;display:none">0</span></div><div class="ms-head" style="margin-top:10px">Folders</div><div class="mf" data-folder="archive" onclick="olFolder('archive')"><span><span class="ic">📁</span>Archive</span><span id="olArchCount" style="background:#605e5c;color:#fff;font-size:10px;padding:1px 7px;border-radius:10px;font-weight:600;display:none">0</span></div><div class="mf" data-folder="important" onclick="olFolder('important')"><span><span class="ic">⭐</span>Important</span></div></div><div class="mm"><div id="mlist" style="overflow-y:auto"></div><div class="md" id="mdet"><div class="mdb" onclick="btl()">← Back to Inbox</div><div class="mds" id="dsubj"></div><div class="mdm-row"><div class="mav" id="davatar">U</div><div class="mdm" id="dmeta"></div></div><div class="mdy" id="dbody"></div><div class="mra" id="dra"><div class="mra-pills"><button class="mra-pill primary" type="button" onclick="olReplyExpand()">↩ Reply</button><button class="mra-pill" type="button" onclick="olForward()">↪ Forward</button><span class="mra-collapse" onclick="olReplyCollapse()" id="mraCollapseBtn" style="display:none">Collapse</span></div><div class="mra-head"><div class="mra-row"><div class="lbl">To</div><div id="rTo"></div><div class="mra-toggles"><span class="mra-add" id="ccBtn" onclick="toggleCcBcc('cc')">Cc</span><span class="mra-add" id="bccBtn" onclick="toggleCcBcc('bcc')">Bcc</span></div></div><div class="mra-row" id="rCcRow" style="display:none"><div class="lbl">Cc</div><input class="mra-input" id="rCc" placeholder="Add cc recipients"></div><div class="mra-row" id="rBccRow" style="display:none"><div class="lbl">Bcc</div><input class="mra-input" id="rBcc" placeholder="Add bcc recipients"></div><div class="mra-row"><div class="lbl">Subject</div><input class="mra-input" id="rSubj" placeholder="Re:"></div></div><div class="mra-fmt"><span class="ff" title="Font">Calibri ▾</span><span class="ff" title="Size">11 ▾</span><span class="sep"></span><button class="fb" type="button" title="Bold (Ctrl+B)" onclick="fmtIns('**')"><b>B</b></button><button class="fb" type="button" title="Italic (Ctrl+I)" onclick="fmtIns('*')"><i>I</i></button><button class="fb" type="button" title="Underline" onclick="fmtIns('__')"><u>U</u></button><span class="sep"></span><button class="fb" type="button" title="Bulleted list" onclick="fmtList('- ')">•</button><button class="fb" type="button" title="Numbered list" onclick="fmtList('1. ')">1.</button><span class="sep"></span><button class="fb" type="button" title="Link" onclick="fmtLink()">🔗</button><button class="fb" type="button" title="Attach file" onclick="alert('Attachments not supported in this simulation')">📎</button><button class="fb" type="button" title="Insert emoji" onclick="fmtIns('😊','')">😊</button><div class="sp"></div><span class="ff" title="Importance">! High</span></div><div class="mra-body"><textarea id="rtxt" placeholder="Type your reply..."></textarea><div class="mra-sig" id="rSig"></div></div><div class="mra-actions"><button class="mrb" onclick="sr()">▶ Send</button><button class="mra-act" type="button" onclick="document.getElementById('rtxt').value=''">Discard</button><button class="mra-act" type="button" onclick="olSaveDraft()">💾 Save draft</button><div style="margin-left:auto;font-size:11px;color:#a19f9d">Signed in as <b id="rMe" style="color:#605e5c">you</b></div></div></div></div></div></div></div></div></div>
@@ -1473,7 +1514,7 @@ button{cursor:pointer}
 <button class="tb" onclick="tw('tasks')" id="tbTasks">Tasks</button>
 <button class="tb" onclick="tw('chat')" id="tbChat">Slack</button>
 <button class="tb" onclick="openGuide()" id="tbGuide" style="display:none;background:rgba(251,191,36,0.16);color:#fcd34d">📖 Guide</button>
-<div class="tbr"><span class="tbs" id="simClock" title="Simulation time · real time remaining" style="display:none;background:linear-gradient(180deg,#6366f1,#4f46e5)">09:00 · 2h 00m</span><button class="mtg-pill" id="mtgPill" onclick="openMeeting()">Standup 11:00</button><button class="day-pill" id="dayPill" onclick="advanceDay()" style="display:none">+1 Day · Day 1/5</button><span class="tbs" id="tbrep" title="Workplace conduct standing">✓ Good Standing</span><span class="tbs" id="tbsc">0 pts</span><button class="tb" onclick="bh()" style="background:rgba(255,255,255,0.05);color:#cbd5e1">← Back to Roles</button><button class="tb" onclick="ed()" style="background:rgba(220,38,38,0.2);color:#fca5a5">End Day</button></div>
+<div class="tbr"><span class="tbs" id="simClock" title="Simulation time · real time remaining" style="display:none;background:linear-gradient(180deg,#6366f1,#4f46e5)">09:00 · 2h 00m</span><button class="mtg-pill" id="mtgPill" onclick="openMeeting()">Standup 11:00</button><button class="day-pill" id="dayPill" onclick="ed()" title="Open end-of-day review" style="display:none">Day 1/5</button><span class="tbs" id="tbrep" title="Workplace conduct standing">✓ Good Standing</span><span class="tbs" id="tbsc">0 pts</span><button class="tb" onclick="bh()" style="background:rgba(255,255,255,0.05);color:#cbd5e1">← Back to Roles</button><button class="tb" onclick="ed()" style="background:rgba(220,38,38,0.2);color:#fca5a5">End Day</button></div>
 </div>
 <script>
 const A='';let ce=null,ds=null,cc=null,ct='bank',currentUser=null;
@@ -1495,7 +1536,7 @@ window.fetch=function(url,opts){
   });
 };
 function showAuth(){try{closeAllModals()}catch(e){}document.body.classList.remove('desk-mode');document.getElementById('authScreen').classList.add('on');document.getElementById('careerSelect').classList.remove('on');document.getElementById('desktop').classList.remove('active');document.getElementById('taskbar').classList.remove('active');document.querySelector('.brand').style.display='flex';const gb=document.getElementById('guestBanner');if(gb)gb.classList.remove('on');try{_stopSimClockPoll()}catch(e){}try{_resetBeginnerAids()}catch(e){}window.scrollTo(0,0)}
-function showLanding(){try{closeAllModals()}catch(e){}document.body.classList.remove('desk-mode');document.getElementById('authScreen').classList.remove('on');document.getElementById('careerSelect').classList.add('on');document.getElementById('desktop').classList.remove('active');document.getElementById('taskbar').classList.remove('active');document.querySelector('.brand').style.display='flex';try{_stopSimClockPoll()}catch(e){}try{_resetBeginnerAids()}catch(e){}window.scrollTo(0,0);backToChooser();loadDashboard();try{_syncPaidUI()}catch(e){}}
+function showLanding(){try{closeAllModals()}catch(e){}try{dismissFirstMinCoach()}catch(e){}document.body.classList.remove('desk-mode');document.getElementById('authScreen').classList.remove('on');document.getElementById('careerSelect').classList.add('on');document.getElementById('desktop').classList.remove('active');document.getElementById('taskbar').classList.remove('active');document.querySelector('.brand').style.display='flex';try{_stopSimClockPoll()}catch(e){}try{_resetBeginnerAids()}catch(e){}window.scrollTo(0,0);backToChooser();loadDashboard();try{_syncPaidUI()}catch(e){}}
 const _PAID_PLANS=['pro','premium','team','enterprise'];
 function _isPaidUser(){return !!(currentUser&&currentUser.plan&&_PAID_PLANS.indexOf(currentUser.plan)>=0)}
 function openPaywall(){const m=document.getElementById('paywall');if(m)m.classList.add('on')}
@@ -1562,8 +1603,11 @@ async function loadDashboard(){
     const ints=(d.interviews||[]).slice(0,5).map(i=>'<div class="hist-row"><span class="hist-ic">🎤</span><span class="hist-t">'+esc(i.role||'')+' interview</span><span class="hist-s">'+i.score+'/100</span><span class="hist-d">'+esc(i.date||'')+'</span></div>').join('');
     const histBlock=(sims||ints)?('<div class="hist-list">'+sims+ints+'</div>'):'<div class="hist-empty">No history yet — start your first simulation or interview below.</div>';
     const isGuest=currentUser.is_guest||d.is_guest;
-    const guestNote=isGuest?'<div class="guest-cta">You\'re in guest mode. <button onclick="signout()" class="guest-cta-btn">Register to save progress →</button></div>':'';
-    host.innerHTML='<div class="dash-card"><div class="dash-h"><div><div class="dash-eyebrow">Welcome back</div><h2 class="dash-name">'+name+'</h2></div><div class="dash-emp"><div class="dash-emp-num">'+(d.employability_score||0)+'</div><div class="dash-emp-lbl">Employability</div></div></div>'+guestNote+'<div class="dash-sub">Your history</div>'+histBlock+(isGuest?'':'<div class="dash-actions"><button class="dash-link" onclick="deleteAccount()">Delete account &amp; data</button></div>')+'</div>';
+    _inProgress=d.in_progress||null;
+    _markCareerResume();
+    const guestNote=isGuest?'<div class="guest-cta">You\'re in guest mode. Progress can drift. <button onclick="signout()" class="guest-cta-btn">Register to keep Day 2 →</button></div>':'';
+    const cont=_inProgress?('<div class="dash-continue"><button type="button" class="dash-cta" onclick="continueDesk()">Continue Day '+(_inProgress.current_day||1)+' · '+esc(_inProgress.title||_inProgress.career)+'</button></div>'):'';
+    host.innerHTML='<div class="dash-card"><div class="dash-h"><div><div class="dash-eyebrow">Welcome back</div><h2 class="dash-name">'+name+'</h2></div><div class="dash-emp"><div class="dash-emp-num">'+(d.employability_score||0)+'</div><div class="dash-emp-lbl">Employability</div></div></div>'+guestNote+cont+'<div class="dash-sub">Your history</div>'+histBlock+(isGuest?'':'<div class="dash-actions"><button class="dash-link" onclick="deleteAccount()">Delete account &amp; data</button></div>')+'</div>';
     host.style.display='block';
   }catch(e){host.style.display='none'}
 }
@@ -1758,6 +1802,9 @@ function skeletonRows(n){
   }
   return '<div class="sk-list" role="status" aria-label="Loading">'+html+'</div>';
 }
+let _inProgress=null;        // {career, current_day, ...} from profile
+let _pendingReset=false;     // true only when the user chose Start over
+let _pendingResume=null;     // session snapshot while the Continue overlay is open
 // Career start — first show experience-level picker, then POST /api/start.
 let _pendingCareer=null;       // career chosen but level not yet picked
 let _pendingJDBody=null;       // JD-mode body waiting for level pick (null in hard-coded mode)
@@ -1765,11 +1812,70 @@ let _isBeginner=false;         // session.experience_level === 'beginner'
 let _tipsByType={};            // {tool_type: {col_key: tooltip_text}}
 function showLevelPicker(){const ov=document.getElementById('levelSelect');if(ov){ov.style.display='flex'}}
 function hideLevelPicker(){const ov=document.getElementById('levelSelect');if(ov){ov.style.display='none'}}
-function cancelLevel(){_pendingCareer=null;_pendingJDBody=null;hideLevelPicker()}
+function showResumePicker(){const ov=document.getElementById('resumeSelect');if(ov){ov.style.display='flex'}}
+function hideResumePicker(){const ov=document.getElementById('resumeSelect');if(ov){ov.style.display='none'}}
+function cancelLevel(){_pendingCareer=null;_pendingJDBody=null;_pendingReset=false;hideLevelPicker()}
+function cancelResume(){_pendingCareer=null;_pendingResume=null;hideResumePicker()}
+function _markCareerResume(){
+  document.querySelectorAll('.career-card').forEach(card=>{
+    const m=(card.getAttribute('onclick')||'').match(/startCareer\('([^']+)'\)/);
+    if(!m)return;
+    const go=card.querySelector('.go');if(!go)return;
+    if(_inProgress&&_inProgress.career===m[1]){
+      card.classList.add('resume');
+      go.innerHTML='Continue Day '+(_inProgress.current_day||1)+' <span class="arr">→</span>';
+    }else{
+      card.classList.remove('resume');
+      go.innerHTML='Begin <span class="arr">→</span>';
+    }
+  });
+}
 async function startCareer(career){
 _pendingCareer=career;
 _pendingJDBody=null;
+_pendingReset=false;
+try{
+  const sr=await fetch(A+'/api/session');
+  if(sr.ok){
+    const sd=await sr.json();
+    if(sd&&sd.career===career&&sd.sim_id){
+      _pendingResume=sd;
+      const day=Number(sd.current_day)||1;
+      const sub=document.getElementById('resumeSub');
+      const desc=document.getElementById('resumeDesc');
+      if(sub)sub.textContent='You already have a '+career+' desk on day '+day+'. Continue compounds. Start over wipes it.';
+      if(desc)desc.textContent='Day '+day+' · same inbox, same tools. This is not a new attempt.';
+      showResumePicker();
+      return;
+    }
+  }
+}catch(e){}
 showLevelPicker();
+}
+async function confirmResume(){
+hideResumePicker();
+const career=_pendingCareer;const snap=_pendingResume;
+_pendingCareer=null;_pendingResume=null;_pendingReset=false;
+if(!career){toast('No career selected','error');return}
+const lvl=(snap&&snap.experience_level)||'studied';
+cc=career;
+showLoader('Opening your desk…','Picking up day '+(Number(snap&&snap.current_day)||1));
+let d;
+try{const r=await fetch(A+'/api/start',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({career,experience_level:lvl,reset:false})});d=await r.json()}
+catch(e){hideLoader();toast('Could not resume. Try again.','error');return}
+await _bootSimulation(d, career);
+}
+function confirmStartOver(){
+hideResumePicker();
+_pendingReset=true;
+showLevelPicker();
+}
+async function continueDesk(){
+if(!_inProgress||!_inProgress.career)return;
+choosePath('simulation');
+_pendingCareer=_inProgress.career;
+_pendingResume=_inProgress;
+await confirmResume();
 }
 async function confirmLevel(level){
 hideLevelPicker();
@@ -1798,7 +1904,7 @@ if(jd){
 // Hard-coded career flow
 showLoader('Starting your first day at '+({accountant:'Apex Financial',cybersecurity:'ShieldWall',marketing:'BrightPath',developer:'CodeCraft Labs',procurement:'TechStack Procurement',hr:'Helix People Co.',pm:'Northwind Cloud',grc:'Halcyon Health'})[career]+'…','Hiring AI coworkers, seeding your inbox, opening your tools');
 let d;
-try{const r=await fetch(A+'/api/start',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({career,experience_level:level})});d=await r.json()}
+try{const r=await fetch(A+'/api/start',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({career,experience_level:level,reset:!!_pendingReset})});d=await r.json();_pendingReset=false}
 catch(e){hideLoader();toast('Could not start session. Is the backend running?','error');return}
 await _bootSimulation(d, career);
 }
@@ -1829,6 +1935,7 @@ showLevelPicker();
 // Shared boot path used by both startCareer (hard-coded) and startFromJD (adaptive)
 async function _bootSimulation(d, career){
 showDesktop();
+const resumed=(d&&d.status)==='resumed';
 const icons=document.getElementById('desktopIcons');
 const toolMap={accountant:{icon:'sage',name:'Sage',tint:'#22A06B'},cybersecurity:{icon:'siem',name:'SIEM',tint:'#DC2626'},marketing:{icon:'campaigns',name:'Campaigns',tint:'#7C3AED'},developer:{icon:'jira',name:'Jira',tint:'#F59E0B'},procurement:null,hr:null,pm:null,grc:null};
 const tm=toolMap[career];
@@ -1853,7 +1960,7 @@ extras.forEach(t=>{
 });
 }
 const primaryHtml=tm?`<div class="di" onclick="openToolTab('${PRIMARY_TAB[career]}')"><div class="di-img" style="--tint:${tm.tint}">${ICONS[tm.icon]}</div><div class="di-lbl">${tm.name}</div></div>`:'';
-icons.innerHTML=`<div class="di" onclick="tw('outlook')"><div class="di-img" style="--tint:#2563EB">${ICONS.outlook}</div><div class="di-lbl">Outlook</div></div>`+primaryHtml+`<div class="di" onclick="openHrPortal()"><div class="di-img" style="--tint:#0F766E">${ICONS.hr}</div><div class="di-lbl">HR Portal</div></div><div class="di" onclick="openChecklist('training')"><div class="di-img" style="--tint:#7C3AED">${ICONS.learn}</div><div class="di-lbl">Learning</div></div><div class="di" onclick="tw('tasks')"><div class="di-img" style="--tint:#6366F1">${ICONS.tasks}</div><div class="di-lbl">Tasks</div></div><div class="di" onclick="tw('chat')"><div class="di-img" style="--tint:#0F766E">${ICONS.slack}</div><div class="di-lbl">Slack</div></div>`+extraHtml;
+icons.innerHTML=`<div class="di${resumed?'':' pulse'}" id="diOutlook" onclick="tw('outlook');dismissFirstMinCoach()"><div class="di-img" style="--tint:#2563EB">${ICONS.outlook}</div><div class="di-lbl">Outlook</div></div>`+primaryHtml+`<div class="di" onclick="openHrPortal()"><div class="di-img" style="--tint:#0F766E">${ICONS.hr}</div><div class="di-lbl">HR Portal</div></div><div class="di" onclick="openChecklist('training')"><div class="di-img" style="--tint:#7C3AED">${ICONS.learn}</div><div class="di-lbl">Learning</div></div><div class="di" onclick="tw('tasks')"><div class="di-img" style="--tint:#6366F1">${ICONS.tasks}</div><div class="di-lbl">Tasks</div></div><div class="di" onclick="tw('chat')"><div class="di-img" style="--tint:#0F766E">${ICONS.slack}</div><div class="di-lbl">Slack</div></div>`+extraHtml;
 document.getElementById('toolTitle').textContent=tm?tm.name:'Tool';
 document.getElementById('toolName').textContent=tm?tm.name:'Tool';
 document.getElementById('tbTool').style.display=tm?'':'none';
@@ -1892,16 +1999,47 @@ document.getElementById('flagBtn').style.display='none';
 }
 const company=(d&&d.company)||{accountant:'Apex Financial',cybersecurity:'ShieldWall',marketing:'BrightPath',developer:'CodeCraft Labs',procurement:'TechStack Procurement Ltd',hr:'Helix People Co.',pm:'Northwind Cloud',grc:'Halcyon Health'}[career];
 const ws=document.getElementById('slWsName');if(ws)ws.textContent=company||'FirstDesk';
-tw('outlook');tw('chat');
+tw('outlook');
 // Generic tools — adaptive scenarios populate tools_col; render an icon per tool.
 await loadGenericToolIcons();
 // Fetch session metadata (experience_level, current_day) and tooltips for beginner mode.
 await _loadLevelMeta(career);
 hideLoader();
 const src=(d&&d.source)||'hard_coded_seed';
-const srcLabel=src==='adaptive_engine'?' · adaptive scenario':src==='user_paste'?' · from your JD':'';
-toast('Welcome to '+company+srcLabel+'. Your first day starts now.','success');
-await sm("I just arrived at the office. It's my first day as a "+(d&&d.title?d.title:career)+".");
+const srcLabel=src==='adaptive_engine'?' · adaptive scenario':src==='user_paste'?' · from your JD':src==='resume'?' · continued':'';
+const dayN=Number((d&&d.current_day)||window._curDay||1);
+if(resumed){
+  toast('Welcome back to '+company+'. Day '+dayN+' — pick up where you left off.','success');
+}else{
+  toast('Welcome to '+company+srcLabel+'. Open Outlook — your manager already emailed you.','success');
+  _showFirstMinCoach(career);
+}
+if(resumed&&d&&d.auto_ended){
+  try{ed()}catch(e){}
+}
+}
+
+function _showFirstMinCoach(career){
+  const el=document.getElementById('firstMinCoach');if(!el)return;
+  const title=document.getElementById('fmcTitle');
+  const body=document.getElementById('fmcBody');
+  const next={
+    cybersecurity:'Then open SIEM and triage overnight alerts. That is the job — Slack is optional.',
+    accountant:'Then open Sage and start the bank rec. Slack is optional.',
+    developer:'Then open Jira and pick up the ticket your manager named.',
+    marketing:'Then open Campaigns and check the live brief.',
+    hr:'Then open the HR portal from Diane\'s email.',
+    procurement:'Then open Tasks — the PO that should not be approved is in there.',
+    pm:'Then open Tasks — unwind the broken A/B test first.',
+    grc:'Then open the risk register. Do not mark controls implemented without evidence.'
+  };
+  if(title)title.textContent='Your manager emailed you.';
+  if(body)body.textContent='Outlook is open. Start with the unread HIGH message. '+(next[career]||'Do the work in the tool — you do not need to announce it in Slack.');
+  el.style.display='block';
+}
+function dismissFirstMinCoach(){
+  const el=document.getElementById('firstMinCoach');if(el)el.style.display='none';
+  const ic=document.getElementById('diOutlook');if(ic)ic.classList.remove('pulse');
 }
 
 // ── EXPERIENCE LEVEL + DAY CURSOR ────────────────────────────
@@ -2018,7 +2156,8 @@ function _updateDayPill(career, day){
   const pill=document.getElementById('dayPill');if(!pill)return;
   if(!career){pill.style.display='none';return}
   pill.style.display='inline-flex';
-  pill.textContent='+1 Day · Day '+day+'/5';
+  pill.textContent='Day '+day+'/5';
+  pill.title='Open end-of-day review — days advance from there, not here';
   pill.disabled=(day>=5);
 }
 // ── SIMULATION CLOCK ─────────────────────────────────────
@@ -3518,7 +3657,7 @@ async function startNextDay(){
 }
 function ceod(){document.getElementById('eod').classList.remove('on');closeModalA11y('eod')}
 // Back to role selection
-function bh(){if(!confirm('Return to role selection? Your current session will be reset.'))return;try{ceod()}catch(e){document.getElementById('eod').classList.remove('on')}cc=null;ce=null;ds=null;document.querySelectorAll('.window').forEach(w=>w.classList.remove('active','focused'));showLanding();document.getElementById('cmsg').innerHTML='';document.getElementById('mlist').innerHTML='';document.getElementById('tlist').innerHTML='';document.getElementById('toolTable').innerHTML='';document.getElementById('mc').textContent='0';document.getElementById('tmc').textContent='0';document.getElementById('tbsc').textContent='0 pts';const rep=document.getElementById('tbrep');rep.textContent='✓ Good Standing';rep.style.background='#059669'}
+function bh(){if(!confirm('Return to role selection? Your desk stays saved — continue it from the career list.'))return;try{ceod()}catch(e){document.getElementById('eod').classList.remove('on')}cc=null;ce=null;ds=null;document.querySelectorAll('.window').forEach(w=>w.classList.remove('active','focused'));showLanding();document.getElementById('cmsg').innerHTML='';document.getElementById('mlist').innerHTML='';document.getElementById('tlist').innerHTML='';document.getElementById('toolTable').innerHTML='';document.getElementById('mc').textContent='0';document.getElementById('tmc').textContent='0';document.getElementById('tbsc').textContent='0 pts';const rep=document.getElementById('tbrep');rep.textContent='✓ Good Standing';rep.style.background='#059669'}
 // Utils
 function esc(s){if(!s)return'';const d=document.createElement('div');d.textContent=s;return d.innerHTML}
 async function uc(){try{const s=await(await fetch(A+'/api/score')).json();document.getElementById('tbsc').textContent=(s.total_score||0)+' pts'}catch(e){}ur()}

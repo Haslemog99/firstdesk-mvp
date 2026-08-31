@@ -3252,6 +3252,9 @@ def init_session(career, experience_level: str = "studied"):
             # 2hr-real = 8hr-sim clock. Frontend ticks 09:00 → 17:00 over 2hrs.
             "real_start_time": datetime.utcnow().isoformat(),
             "auto_ended": False,
+            "last_activity_at": datetime.utcnow().isoformat(),
+            "last_clock_tick": datetime.utcnow().isoformat(),
+            "clock_paused_sec": 0,
         }},
         upsert=True,
     )
@@ -3277,6 +3280,21 @@ def init_reputation():
 # ══════════════════════════════════════════
 # TOOLS
 # ══════════════════════════════════════════
+
+def _format_siem_tool_line(a: dict) -> str:
+    """One SIEM row for the manager. Must include triage + rationale so a
+    correct escalate/resolve in the console counts even without Slack theatre."""
+    rationale = str(a.get("verdict_rationale") or a.get("analyst_notes") or "").strip()
+    if len(rationale) > 220:
+        rationale = rationale[:217] + "..."
+    return (
+        f"[{a.get('severity', '')}] {a.get('id')}: {a.get('title', '')} | "
+        f"source={a.get('source', '')} | status={a.get('status', '')} | "
+        f"triage={a.get('triage_status', '')} | action={a.get('status', '')} | "
+        f"correct_action={a.get('correct_action', '')} | "
+        f"rationale={rationale or '(none)'}"
+    )
+
 
 @tool
 def get_inbox() -> str:
@@ -3396,7 +3414,7 @@ def get_tool_data(tool_name: str) -> str:
         return "\n".join(lines) if lines else "No invoices."
     elif tool_name == "siem_alerts":
         alerts = list(siem_col.find({"simulation_id": sim_id(), "day": {"$lte": _current_day()}}, {"_id": 0}))
-        return "\n".join([f"[{a['severity']}] {a['source']}: {a['title']} | Status: {a['status']} | id:{a['id']}" for a in alerts])
+        return "\n".join(_format_siem_tool_line(a) for a in alerts) if alerts else "No alerts."
     elif tool_name == "jira_tickets":
         tickets = list(jira_col.find({"simulation_id": sim_id()}, {"_id": 0}))
         lines = []
@@ -4243,6 +4261,7 @@ MANAGER TASK REVIEW (this is the PRIMARY scoring mechanism — most points come 
 - On EVERY response, call get_tasks first to look for tasks with review_status="pending_review". If any exist, you MUST review them BEFORE replying conversationally.
 - To review properly, EXAMINE THE EVIDENCE — use get_tool_data (sage_ledger / sage_invoices / siem_alerts / jira_tickets / campaigns / hr_onboarding / training / it_setup / files / attachments / meetings) and read_email to see what the user actually did. Did they post the right journal? Reply to the client? Update the campaign with the correct brand colour? Triage the alert correctly? Submit the HR portal / training / IT-setup checklist? Save the file? Comment evidence on COMP-014?
 - For onboarding / HR portal / starter-checklist / bank-details tasks: call get_tool_data("hr_onboarding") FIRST. If it says SUBMITTED, that is the evidence — approve and cite the portal submission. Do not demand a handwritten reply if the portal already filed a confirmation to HR. If it says NOT SUBMITTED, mark needs_rework and tell them to open the HR portal from the HR email (not just click Complete).
+- For SIEM / SOC / alert-triage / brute-force / incident tasks: call get_tool_data("siem_alerts") FIRST. If an alert shows triage=reviewed (or investigating) AND a rationale, that IS the work — approve and cite the alert ID + action. Do not require a Slack post or a handwritten email write-up of the same finding. If they also opened a Jira case, treat comments there as extra evidence, not a missing channel. Only mark needs_rework when the alert is still unreviewed.
 - For training / LMS / handbook / GDPR / HIPAA / e-learning / policy-acknowledgement tasks: call get_tool_data("training") FIRST. SUBMITTED is the evidence — approve. Do not demand a handwritten reply.
 - For YubiKey / SSH / VPN / clone-repo / Hootsuite-access tasks: call get_tool_data("it_setup") FIRST. SUBMITTED is the evidence — approve.
 - For SharePoint / shared-drive / data-room / v2-folder save tasks: call get_tool_data("files") FIRST. SAVED is the evidence — approve.
@@ -4896,6 +4915,7 @@ class ChatReq(BaseModel):
 class CareerReq(BaseModel):
     career: str = Field(..., pattern=r"^(accountant|cybersecurity|marketing|developer|procurement|hr|pm|grc)$")
     experience_level: str = Field("experienced", pattern=r"^(experienced|studied|beginner)$")
+    reset: bool = False
 
 class ReplyReq(BaseModel):
     email_id: str = Field(..., min_length=1, max_length=64)
@@ -5212,6 +5232,8 @@ async def api_track(req: TrackReq):
             "ref": req.ref,
             "ts": datetime.utcnow().isoformat(),
         })
+        if req.kind in ("tool_switch", "email_open", "custom"):
+            _touch_activity()
     except Exception:
         pass
     return {"status": "ok"}
@@ -5272,11 +5294,24 @@ async def profile_history(request: Request):
     parts = [v for v in (best_sim, best_int) if v is not None]
     employability = int(round(sum(parts) / len(parts))) if parts else 0
 
+    sess = sessions_col.find_one({"session_id": f"sess_{uid}"}, {"_id": 0}) or {}
+    in_progress = None
+    if sess.get("career") and sess.get("sim_id"):
+        in_progress = {
+            "career": sess.get("career"),
+            "current_day": int(sess.get("current_day") or 1),
+            "experience_level": sess.get("experience_level") or "studied",
+            "auto_ended": bool(sess.get("auto_ended")),
+            "title": sess.get("title") or "",
+            "company": sess.get("company") or "",
+        }
+
     return {
         "simulations": simulations,
         "interviews": interviews,
         "employability_score": employability,
         "is_guest": bool(user.get("is_guest")),
+        "in_progress": in_progress,
     }
 
 @app.delete("/api/auth/account")
@@ -5314,11 +5349,64 @@ async def auth_delete_account(authorization: Optional[str] = Header(None)):
     log.info("auth.account_deleted user=%s totals=%s", uid, deleted)
     return {"ok": True, "deleted": deleted}
 
+def _should_resume_session(existing: dict, career: str, reset: bool) -> bool:
+    """Continue the open desk instead of wiping it. Level-picker 'Start' used
+    to call /api/start every time, which looked like 'this didn't work, try again'."""
+    if reset:
+        return False
+    if not existing:
+        return False
+    if (existing.get("career") or "") != career:
+        return False
+    if not existing.get("sim_id"):
+        return False
+    return True
+
+def _sync_progress(uid: str, career: str, day: int, completed_inc: int = 0) -> None:
+    if not uid:
+        return
+    q: dict = {"$set": {"current_career": career, "current_day": int(day or 1)}}
+    if completed_inc:
+        q["$inc"] = {"days_completed": int(completed_inc)}
+    try:
+        progress_col.update_one({"user_id": uid}, q, upsert=True)
+    except Exception:
+        pass
+
+def _touch_activity() -> None:
+    try:
+        sessions_col.update_one(
+            {"session_id": session_id()},
+            {"$set": {"last_activity_at": datetime.utcnow().isoformat()}},
+        )
+    except Exception:
+        pass
+
 @app.post("/api/start")
 async def start_career(req: CareerReq, request: Request):
     if req.career not in CAREER_CONFIGS:
         return {"error": f"Unknown career: {req.career}. Options: {list(CAREER_CONFIGS.keys())}"}
     user = request.state.user
+    existing = sessions_col.find_one({"session_id": session_id()}) or {}
+    if _should_resume_session(existing, req.career, bool(req.reset)):
+        _career_var.set(req.career)
+        lvl = existing.get("experience_level") or req.experience_level
+        day = int(existing.get("current_day") or 1)
+        set_orchestrator(create_orchestrator(req.career, lvl))
+        _sync_progress(user["user_id"], req.career, day)
+        _invalidate_user_cache(user["user_id"])
+        cfg = CAREER_CONFIGS[req.career]
+        log.info("start.resumed user=%s career=%s day=%s", user["user_id"], req.career, day)
+        return {
+            "status": "resumed", "career": req.career,
+            "title": existing.get("title") or cfg["title"],
+            "company": existing.get("company") or cfg["company"],
+            "tools": list(cfg["tools"]),
+            "current_day": day,
+            "experience_level": lvl,
+            "auto_ended": bool(existing.get("auto_ended")),
+            "source": "resume",
+        }
     _career_var.set(req.career)
     reset_chat_history()
     clear_sim()
@@ -5384,6 +5472,7 @@ async def start_career(req: CareerReq, request: Request):
         "company": (scenario_summary or {}).get("company", cfg["company"]),
         "tools": list((scenario_summary or {}).get("tools_palette") or cfg["tools"]),
         "scenario": scenario_summary,
+        "current_day": 1,
         "source": "adaptive_engine" if used_engine else "hard_coded_seed",
     }
 
@@ -5400,6 +5489,7 @@ async def chat(req: ChatReq, request: Request, background: BackgroundTasks):
     sm = sim_id()
     career = get_career()
     sessions_col.update_one({"session_id": sid}, {"$inc": {"interaction_count": 1}})
+    _touch_activity()
     actions_col.insert_one({"simulation_id": sm, "action": req.message[:200], "ts": datetime.utcnow().isoformat()})
     # Tone classifier + escalation run async — they're observability, not on the hot reply path.
     # We pass the captured scope explicitly because BackgroundTasks runs in a fresh contextvars copy.
@@ -5477,6 +5567,7 @@ async def chat(req: ChatReq, request: Request, background: BackgroundTasks):
 async def api_mark_read(email_id: str):
     emails_col.update_one({"id": email_id, "simulation_id": sim_id()}, {"$set": {"read": True}})
     sessions_col.update_one({"session_id": session_id()}, {"$addToSet": {"emails_read": email_id}})
+    _touch_activity()
     actions_col.insert_one({"simulation_id": sim_id(), "kind": "email_open", "email_id": email_id,
                             "ts": datetime.utcnow().isoformat()})
     return {"status": "ok"}
@@ -5632,6 +5723,7 @@ async def api_complete_task(task_id: str):
         {"$addToSet": {"tasks_completed": task_id}, "$inc": {"score_adj": completion_credit}},
     )
     emit("task_completed", {"task": t})
+    _touch_activity()
     return {"ok": True, "task": t, "completion_credit": completion_credit, "awaiting_review": True,
             "message": f"+{completion_credit}pts completion credit. Manager will review your work for the rest."}
 
@@ -5876,6 +5968,7 @@ async def api_advance_day():
     for sub_key, col in _DAY_PACK_COLS.items():
         revealed += _insert_day_pack(day_pack.get(sub_key) or [], col, nxt, _sim)
     sessions_col.update_one({"session_id": session_id()}, {"$set": {"current_day": nxt}})
+    _sync_progress(user_id() or "", career or "", nxt)
     return {"current_day": nxt, "previous_day": cur, "revealed": revealed, "career": career}
 
 @app.post("/api/simulation/next-day")
@@ -5933,8 +6026,12 @@ async def api_next_day():
         {"session_id": session_id()},
         {"$set": {"current_day": nxt,
                   "real_start_time": datetime.utcnow().isoformat(),
-                  "auto_ended": False}},
+                  "auto_ended": False,
+                  "last_activity_at": datetime.utcnow().isoformat(),
+                  "last_clock_tick": datetime.utcnow().isoformat(),
+                  "clock_paused_sec": 0}},
     )
+    _sync_progress(user_id() or "", career or "", nxt, completed_inc=1)
 
     # 5) Manager performance email
     cfg = CAREER_CONFIGS.get(career) or {}
@@ -6042,6 +6139,7 @@ async def api_siem_triage(alert_id: str, body: SiemTriageReq):
         {"session_id": session_id()},
         {"$addToSet": {"alerts_triaged": alert_id}},
     )
+    _touch_activity()
     correct_action = (alert.get("correct_action") or "").strip().lower()
     base_pts = int(alert.get("points") or 10)
     sev = (alert.get("severity") or "").upper()
@@ -6796,6 +6894,36 @@ _REAL_DAY_SEC_BY_LEVEL = {
     "experienced":  90 * 60,      # 1h30 — no slack
 }
 
+# Tab left open, person gone: do not let wall-clock idle consume the sim day.
+_IDLE_PAUSE_AFTER_SEC = 180  # 3 real minutes without a user action
+
+def _parse_iso_dt(value, fallback):
+    if not value:
+        return fallback
+    try:
+        return datetime.fromisoformat(str(value).replace("Z", ""))
+    except Exception:
+        return fallback
+
+def _tick_idle_pause(session: dict, now: datetime) -> dict:
+    """Accumulate paused clock time while the user is idle. Returning from
+    idle must KEEP the pause — otherwise a 47-minute coffee break dumps onto
+    elapsed the moment they click again."""
+    last_act = _parse_iso_dt(
+        session.get("last_activity_at"),
+        _parse_iso_dt(session.get("real_start_time"), now),
+    )
+    last_tick = _parse_iso_dt(session.get("last_clock_tick"), now)
+    paused = float(session.get("clock_paused_sec") or 0)
+    idle = (now - last_act).total_seconds()
+    dt = max(0.0, (now - last_tick).total_seconds())
+    if idle > _IDLE_PAUSE_AFTER_SEC:
+        paused += dt
+    return {
+        "clock_paused_sec": paused,
+        "last_clock_tick": now.isoformat(),
+    }
+
 def _real_day_sec(session: Optional[dict]) -> int:
     return _REAL_DAY_SEC_BY_LEVEL.get(
         (session or {}).get("experience_level"), _REAL_DAY_SEC)
@@ -6810,7 +6938,8 @@ def _sim_clock(session: dict) -> dict:
         rs = datetime.fromisoformat(rs_iso)
     except Exception:
         rs = datetime.utcnow()
-    elapsed = max(0.0, (datetime.utcnow() - rs).total_seconds())
+    paused = float((session or {}).get("clock_paused_sec") or 0)
+    elapsed = max(0.0, (datetime.utcnow() - rs).total_seconds() - paused)
     day_sec = _real_day_sec(session)
     remaining = max(0.0, day_sec - elapsed)
     sim_elapsed = min(_SIM_DAY_SEC, (elapsed / day_sec) * _SIM_DAY_SEC)
@@ -6834,6 +6963,13 @@ async def api_sim_clock():
     """Lightweight clock-poll endpoint. Marks auto_ended=True on the session
     when 2 real hours have elapsed so the frontend can trigger end-of-day."""
     s = sessions_col.find_one({"session_id": session_id()}) or {}
+    now = datetime.utcnow()
+    pause_fields = _tick_idle_pause(s, now)
+    try:
+        sessions_col.update_one({"session_id": session_id()}, {"$set": pause_fields})
+    except Exception:
+        pass
+    s = {**s, **pause_fields}
     clock = _sim_clock(s)
     if clock["ended"] and not clock["auto_ended"]:
         sessions_col.update_one({"session_id": session_id()}, {"$set": {"auto_ended": True}})
@@ -7044,10 +7180,12 @@ _MEETINGS: dict[str, dict[int, list[dict]]] = {
 }
 
 # Warning lead-time and how long the door stays open, per difficulty tier.
+_MEETING_ONBOARD_REAL_SEC = 20 * 60  # day-1: don't miss until they've had 20 active minutes
+
 _MEETING_WINDOWS = {
-    "beginner":    {"warn_sim_min": 30, "window_sim_min": 45},
-    "studied":     {"warn_sim_min": 15, "window_sim_min": 30},
-    "experienced": {"warn_sim_min": 5,  "window_sim_min": 15},
+    "beginner":    {"warn_sim_min": 30, "window_sim_min": 90},
+    "studied":     {"warn_sim_min": 20, "window_sim_min": 60},
+    "experienced": {"warn_sim_min": 10, "window_sim_min": 30},
 }
 
 def _sim_offset_sec(hhmm: str) -> int:
@@ -7082,6 +7220,21 @@ def _meeting_runtime(sess: dict, clock: dict, m: dict) -> dict:
     else:
         state = "missed"
 
+    # Day-1 onboarding grace: Chioma/Valentine were still reading mail when
+    # 11:00 sim-time fired. Don't mark missed until they have opened something
+    # AND have had 20 real minutes on the clock.
+    if state == "missed" and not rec.get("submitted_at"):
+        day = int(sess.get("current_day") or 1)
+        onboarded = bool(sess.get("emails_read") or sess.get("alerts_triaged"))
+        active = int(clock.get("elapsed_real_sec") or 0)
+        if day == 1 and (active < _MEETING_ONBOARD_REAL_SEC or not onboarded):
+            if now >= opens:
+                state = "open"
+            elif now >= warn:
+                state = "notified"
+            else:
+                state = "pending"
+
     # sim seconds -> real seconds for the countdown the user sees
     ratio = _real_day_sec(sess) / float(_SIM_DAY_SEC)
     return {
@@ -7115,29 +7268,39 @@ def _sync_meetings(sess: dict, clock: dict) -> list[dict]:
     return out
 
 def _meeting_missed(sess: dict, m: dict) -> None:
-    """No-show: manager notes it in writing, and the prep task's points are lost."""
+    """No-show: manager notes it in writing. Day-1 is a reminder, not a score hit —
+    first-hour readers were getting a penalty email while still in Outlook."""
     cfg = CAREER_CONFIGS.get(sess.get("career") or "cybersecurity", CAREER_CONFIGS["cybersecurity"])
     mgr = cfg["manager"]
+    day1 = int(sess.get("current_day") or 1) == 1
     try:
         emails_col.insert_one({
             "id": f"missed-{m['id']}", "simulation_id": sim_id(),
             "from_name": mgr["name"], "from_role": mgr["role"], "from_email": mgr["email"],
-            "to": "you", "subject": f"You missed {m['title'].lower()}",
-            "body": (f"You weren't on the {m['sim_time']} {m['title'].lower()}.\n\n"
-                     "I needed your update in the room — that's how the rest of the team knows "
-                     "what's covered and what isn't. If you're heads-down in something, say so "
-                     "beforehand and I'll take it async.\n\n"
-                     "Send me your summary by reply now, please.\n\n" + mgr["name"]),
+            "to": "you", "subject": (
+                f"Catch-up: {m['title'].lower()}" if day1
+                else f"You missed {m['title'].lower()}"),
+            "body": (
+                f"I didn't see you in the {m['sim_time']} {m['title'].lower()}. "
+                "Reply here with a two-line update when you can — what you found, what's still open. "
+                "No drama; I just need the rest of the team covered.\n\n" + mgr["name"]
+                if day1 else
+                (f"You weren't on the {m['sim_time']} {m['title'].lower()}.\n\n"
+                 "I needed your update in the room — that's how the rest of the team knows "
+                 "what's covered and what isn't. If you're heads-down in something, say so "
+                 "beforehand and I'll take it async.\n\n"
+                 "Send me your summary by reply now, please.\n\n" + mgr["name"])),
             "time": datetime.utcnow().strftime("%H:%M"), "read": False, "replied": False,
-            "priority": "high", "category": "manager_review", "requires_action": True,
+            "priority": "medium" if day1 else "high", "category": "manager_review", "requires_action": True,
             "day": int(sess.get("current_day") or 1), "injected": True,
         })
     except Exception as ex:
         log.warning("meeting.missed_email_failed kind=%s", type(ex).__name__)
-    pts = _apply_level_weight(-int(m.get("points", 10)), "meeting")
-    sessions_col.update_one({"session_id": session_id()},
-                            {"$inc": {"score_adj": pts},
-                             "$push": {"performance_notes": f"Missed {m['title']} ({m['sim_time']})."}})
+    pts = 0 if day1 else _apply_level_weight(-int(m.get("points", 10)), "meeting")
+    upd = {"$push": {"performance_notes": f"Missed {m['title']} ({m['sim_time']})."}}
+    if pts:
+        upd["$inc"] = {"score_adj": pts}
+    sessions_col.update_one({"session_id": session_id()}, upd)
 
 def _meeting_grounding(career: str) -> dict:
     """What the user ACTUALLY did — the reaction prompt is grounded in this."""
