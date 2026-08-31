@@ -24,6 +24,7 @@ Then open http://localhost:8000.
 | `AUTH_SECRET` | HMAC key for signed tokens. Generate: `python3 -c "import secrets; print(secrets.token_hex(32))"` |
 | `MONGO_URI` | MongoDB Atlas connection string |
 | `FIREWORKS_API_KEY` | LLM provider |
+| `FIREWORKS_MODEL` | Optional. Default `deepseek-v4-pro-0813` |
 
 Optional: `LANGSMITH_API_KEY` (traces LLM runs at https://smith.langchain.com), `HUME_API_KEY`, `ADMIN_TOKEN`, `STRICT_ENV=1` (fail fast).
 

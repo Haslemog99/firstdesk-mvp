@@ -4272,7 +4272,15 @@ Use get_tool_data with: {'sage_bank, sage_ledger, sage_invoices' if career=='acc
 
 NEVER do their work. Create pressure. Be realistic. Start as {cfg['manager']['name']} welcoming them — tell them to check Outlook."""
 
-llm = ChatFireworks(model="accounts/fireworks/models/deepseek-v4-pro", api_key=FIREWORKS_KEY, temperature=0.4)
+# Pinned dated Fireworks ids: unversioned deepseek-v4-pro hangs; llama-v3p3-70b-instruct is gone.
+FIREWORKS_MODEL = os.environ.get(
+    "FIREWORKS_MODEL", "accounts/fireworks/models/deepseek-v4-pro-0813"
+)
+FIREWORKS_OBSERVER_MODEL = os.environ.get(
+    "FIREWORKS_OBSERVER_MODEL", "accounts/fireworks/models/glm-5p3-flash"
+)
+llm = ChatFireworks(model=FIREWORKS_MODEL, api_key=FIREWORKS_KEY, temperature=0.4)
+log.info("fireworks.model=%s observer=%s", FIREWORKS_MODEL, FIREWORKS_OBSERVER_MODEL)
 
 # ── ADAPTIVE SCENARIO ENGINE ─────────────────────────────────────
 # Built once at boot. Falls back to the hard-coded seed_* functions when the
@@ -4588,7 +4596,7 @@ def _task_to_jira(p: dict):
 
 # Cheap, focused classifier — separate from main orchestrator LLM.
 observer_llm = ChatFireworks(
-    model="accounts/fireworks/models/llama-v3p3-70b-instruct",
+    model=FIREWORKS_OBSERVER_MODEL,
     api_key=FIREWORKS_KEY,
     temperature=0,
     max_tokens=200,
