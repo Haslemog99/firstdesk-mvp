@@ -1,7 +1,8 @@
 # Secrets / local config
-.env
-.env.local
-.env.*.local
+# Catch-all for .env variants (backups, per-stage copies), then re-allow the
+# committed template. .env.backup_pre_migration was tracked with live keys.
+.env*
+!.env.example
 run.sh
 
 # Logs
