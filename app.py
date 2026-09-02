@@ -18,7 +18,9 @@ import asyncio
 from collections import defaultdict, deque
 from datetime import datetime, timedelta
 from contextlib import asynccontextmanager
+from html import escape as _html_escape
 from typing import Annotated, Any, Optional
+from urllib.parse import quote
 from fastapi import BackgroundTasks, FastAPI, Header, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
@@ -146,6 +148,9 @@ campaigns_col = db["campaigns"]
 reputation_col = db["reputation"]
 users_col = db["users"]
 progress_col = db["progress"]
+# Password reset tokens. One doc per request, sha256 of the token only, swept
+# by a TTL index on expires_at so expired links need no cron to clean up.
+password_resets_col = db["password_resets"]
 
 # Adaptive Scenario Engine — JD ingestion, scenario templates, per-user uniqueness ledger.
 jobs_col = db["jobs"]
@@ -191,6 +196,13 @@ def _ensure_bootstrap():
                    hr_onboarding_col, training_col, it_setup_col, files_col):
             try: _c.create_index("simulation_id")
             except Exception: pass
+        try:
+            password_resets_col.create_index("token_hash", unique=True)
+            password_resets_col.create_index("user_id")
+            # expires_at must be a real BSON datetime for this to sweep anything.
+            password_resets_col.create_index("expires_at", expireAfterSeconds=0)
+        except Exception:
+            pass
         try:
             sessions_col.create_index("session_id", unique=True)
             sessions_col.create_index("user_id")
@@ -397,8 +409,15 @@ async def _rate_limit_janitor() -> None:
             stale = [k for k, q in _chat_rate.items() if not q or now - q[-1] > _RATE_STALE_SEC]
             for k in stale:
                 _chat_rate.pop(k, None)
-            if stale:
-                log.debug("rate_limit.cleanup removed=%d remaining=%d", len(stale), len(_chat_rate))
+            # _reset_rate is keyed on whatever address was submitted, before we
+            # know the account exists, so it would otherwise grow without bound.
+            # Its window is an hour, so anything older carries no information.
+            reset_stale = [k for k, q in _reset_rate.items() if not q or now - q[-1] > 3600]
+            for k in reset_stale:
+                _reset_rate.pop(k, None)
+            if stale or reset_stale:
+                log.debug("rate_limit.cleanup removed=%d reset_removed=%d remaining=%d",
+                          len(stale), len(reset_stale), len(_chat_rate))
         except asyncio.CancelledError:
             break
         except Exception as ex:
@@ -430,6 +449,66 @@ def _verify_pw(pw: str, stored: str) -> bool:
         return hmac.compare_digest(expected, actual)
     except Exception:
         return False
+
+# ── PASSWORD RESET HELPERS ─────────────────────────────────────
+# Pure functions, no Mongo. Locked by test_password_reset.py.
+_RESET_TTL_SEC = 60 * 60
+_RESET_MAX_PER_HOUR = 3
+
+def _normalize_email(raw: Optional[str]) -> str:
+    """Match how signup stored the address. Without this, someone typing
+    'Name@Org.com' matches nothing and the deliberately-generic success
+    response hides the failure from them."""
+    return (raw or "").strip().lower()
+
+def _hash_reset_token(raw: str) -> str:
+    """Only the digest is ever persisted, so a database dump yields no
+    usable reset links."""
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+def _reset_link(base_url: str, token: str) -> str:
+    return f"{(base_url or '').rstrip('/')}/?reset={quote(token, safe='')}"
+
+def _can_request_reset(user: Optional[dict]) -> bool:
+    """Guests sign in without a password and have nothing to reset. Fails
+    closed on a doc whose password_hash was projected away."""
+    if not user or user.get("is_guest"):
+        return False
+    if _normalize_email(user.get("email")).endswith("@guest.local"):
+        return False
+    return bool(user.get("password_hash"))
+
+def _reset_email_html(name: str, link: str, minutes: int) -> str:
+    who = _html_escape((name or "there").strip() or "there")
+    href = _html_escape(link, quote=True)
+    return f"""<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Reset your FirstDesk password</title></head>
+<body style="margin:0;padding:24px;background:#f4f4f5;font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;color:#18181b">
+<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="max-width:520px;margin:0 auto;background:#ffffff;border-radius:12px">
+<tr><td style="padding:32px">
+<h1 style="margin:0 0 16px;font-size:22px;line-height:1.3">Reset your password</h1>
+<p style="margin:0 0 12px;font-size:16px;line-height:1.6">Hi {who}, we got a request to reset the password on your FirstDesk account.</p>
+<p style="margin:0 0 24px;font-size:16px;line-height:1.6">This link expires in {minutes} minutes and can only be used once.</p>
+<table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr>
+<td style="border-radius:8px;background:#7c3aed"><a href="{href}" style="display:inline-block;padding:14px 28px;font-size:16px;font-weight:600;color:#ffffff;text-decoration:none">Choose a new password</a></td>
+</tr></table>
+<p style="margin:24px 0 8px;font-size:13px;line-height:1.6;color:#52525b">If the button does not work, paste this into your browser:</p>
+<p style="margin:0 0 24px;font-size:13px;line-height:1.6;word-break:break-all"><a href="{href}" style="color:#7c3aed">{href}</a></p>
+<p style="margin:0;font-size:13px;line-height:1.6;color:#52525b">If you did not request this, you can ignore this email. Your password stays as it is, and the link above will expire on its own.</p>
+</td></tr></table>
+</body></html>"""
+
+def _reset_email_text(name: str, link: str, minutes: int) -> str:
+    """Plain-text alternative. Multipart mail scores better with spam filters."""
+    who = (name or "there").strip() or "there"
+    return (f"Hi {who},\n\n"
+            f"We got a request to reset the password on your FirstDesk account.\n\n"
+            f"Choose a new password:\n{link}\n\n"
+            f"This link expires in {minutes} minutes and can only be used once.\n\n"
+            f"If you did not request this, you can ignore this email. Your password\n"
+            f"stays as it is, and the link above will expire on its own.\n")
 
 def _make_token(user_id: str) -> str:
     payload = f"{user_id}.{int(time.time()) + TOKEN_TTL}"
@@ -4944,6 +5023,20 @@ class LoginReq(BaseModel):
     def _email_lc(cls, v: str) -> str:
         return v.strip().lower()
 
+class ForgotPasswordReq(BaseModel):
+    email: str = Field(..., min_length=3, max_length=254)
+
+    @field_validator("email")
+    @classmethod
+    def _email_lc(cls, v: str) -> str:
+        return v.strip().lower()
+
+class ResetPasswordReq(BaseModel):
+    """No email field, deliberately. The account is resolved from the token
+    document, so a valid token can only ever change its own account."""
+    token: str = Field(..., min_length=16, max_length=256)
+    password: str = Field(..., min_length=8, max_length=128)
+
 class JournalReq(BaseModel):
     date: str
     acc: str
@@ -5204,8 +5297,159 @@ async def auth_guest() -> TokenOut:
     return TokenOut(token=_make_token(user_id), user={**_public_user(u), "is_guest": True},
                     progress={"current_career": None, "current_day": 0, "is_guest": True})
 
+# ── PASSWORD RESET ────────────────────────────────────────
+# Sliding hour window, separate from the per-minute chat limiter. Keyed by
+# email and by IP so neither a single account nor a single host can be used
+# to mail-bomb someone.
+_reset_rate: "dict[str, deque]" = defaultdict(lambda: deque(maxlen=8))
+
+def _reset_rate_ok(key: str) -> bool:
+    now = time.time()
+    q = _reset_rate[key]
+    while q and now - q[0] > 3600:
+        q.popleft()
+    if len(q) >= _RESET_MAX_PER_HOUR:
+        return False
+    q.append(now)
+    return True
+
+def _public_base_url(request: Request) -> str:
+    """Where the SPA lives, for building the link we email out. Explicit env
+    first, then Railway's injected domain, then the request origin."""
+    explicit = (os.environ.get("PUBLIC_BASE_URL") or "").strip()
+    if explicit:
+        return explicit.rstrip("/")
+    railway = (os.environ.get("RAILWAY_PUBLIC_DOMAIN") or "").strip()
+    if railway:
+        return f"https://{railway}"
+    return str(request.base_url).rstrip("/")
+
+RESEND_API_KEY = os.environ.get("RESEND_API_KEY", "").strip()
+RESEND_FROM = os.environ.get("RESEND_FROM", "FirstDesk <hello@securegrc.io>").strip()
+RESEND_REPLY_TO = os.environ.get("RESEND_REPLY_TO", "").strip()
+
+def _mask_email(addr: str) -> str:
+    """Log the domain, never the mailbox. Keeps PII out of the log stream."""
+    _, _, domain = (addr or "").partition("@")
+    return f"***@{domain}" if domain else "***"
+
+def _send_reset_email_blocking(to: str, name: str, link: str) -> None:
+    """The Resend SDK is synchronous. Imported here so a missing package never
+    stops the app from booting."""
+    import resend
+
+    resend.api_key = RESEND_API_KEY
+    minutes = _RESET_TTL_SEC // 60
+    params = {
+        "from": RESEND_FROM,
+        "to": [to],
+        "subject": "Reset your FirstDesk password",
+        "html": _reset_email_html(name, link, minutes),
+        "text": _reset_email_text(name, link, minutes),
+    }
+    if RESEND_REPLY_TO:
+        params["reply_to"] = RESEND_REPLY_TO
+    # Keyed on the token, so a retried request cannot mail the same link twice.
+    resend.Emails.send(
+        params, idempotency_key=f"password-reset/{_hash_reset_token(link)[:40]}")
+
+async def _send_reset_email(to: str, name: str, link: str) -> None:
+    if not RESEND_API_KEY:
+        log.info("auth.reset_email_dev_fallback to=%s link=%s", _mask_email(to), link)
+        return
+    try:
+        await asyncio.to_thread(_send_reset_email_blocking, to, name, link)
+        log.info("auth.reset_email_sent to=%s", _mask_email(to))
+    except Exception as ex:
+        # Covers resend.exceptions.ResendError plus transport and import failures.
+        # Swallowed on purpose: the caller already got the generic 200 and must
+        # not be able to tell a delivery failure from a missing account.
+        log.exception("auth.reset_email_failed to=%s kind=%s",
+                      _mask_email(to), type(ex).__name__)
+
+@app.post("/api/auth/forgot-password")
+async def auth_forgot_password(req: ForgotPasswordReq, request: Request,
+                               background: BackgroundTasks):
+    """Always answers the same way. Whether the address exists, belongs to a
+    guest, or is rate limited, the caller sees one generic 200, so this cannot
+    be used to discover who has an account."""
+    _ensure_bootstrap()
+    generic = {"ok": True,
+               "message": "If an account exists for that email, a reset link is on the way."}
+    email = _normalize_email(req.email)
+    ip = _client_ip(request)
+    if not EMAIL_RE.match(email):
+        return generic
+    if not _reset_rate_ok(f"email:{email}") or not _reset_rate_ok(f"ip:{ip}"):
+        log.info("auth.forgot_rate_limited ip=%s", ip)
+        return generic
+
+    user = users_col.find_one({"email": email})
+    if not _can_request_reset(user):
+        log.info("auth.forgot_no_target ip=%s", ip)
+        return generic
+    if user.get("is_demo"):
+        return generic
+
+    raw = secrets.token_urlsafe(32)
+    now = datetime.utcnow()
+    # Any older link for this account stops working the moment a new one is issued.
+    password_resets_col.delete_many({"user_id": user["user_id"]})
+    password_resets_col.insert_one({
+        "token_hash": _hash_reset_token(raw),
+        "user_id": user["user_id"],
+        "email": email,
+        # BSON datetime, not isoformat — the TTL index only sweeps real dates.
+        "created_at": now,
+        "expires_at": now + timedelta(seconds=_RESET_TTL_SEC),
+        "used_at": None,
+        "requested_ip": ip,
+    })
+    link = _reset_link(_public_base_url(request), raw)
+    background.add_task(_send_reset_email, email, user.get("name", ""), link)
+    log.info("auth.forgot_issued user=%s", user["user_id"])
+    return generic
+
+@app.post("/api/auth/reset-password", response_model=TokenOut,
+          responses={400: {"model": ErrorEnvelope}})
+async def auth_reset_password(req: ResetPasswordReq) -> TokenOut:
+    _ensure_bootstrap()
+    doc = password_resets_col.find_one({"token_hash": _hash_reset_token(req.token)})
+    if not doc or doc.get("used_at"):
+        raise HTTPException(400, "That reset link is no longer valid. Request a new one.")
+    expires = doc.get("expires_at")
+    if not isinstance(expires, datetime) or expires < datetime.utcnow():
+        raise HTTPException(400, "That reset link has expired. Request a new one.")
+
+    # The account comes off the token document. Nothing the caller sent can
+    # redirect this at somebody else's login.
+    uid = doc["user_id"]
+    user = users_col.find_one({"user_id": uid})
+    if not _can_request_reset(user):
+        raise HTTPException(400, "That reset link is no longer valid.")
+
+    users_col.update_one({"user_id": uid}, {"$set": {
+        "password_hash": _hash_pw(req.password),
+        "password_changed_at": datetime.utcnow().isoformat(),
+    }})
+    password_resets_col.delete_many({"user_id": uid})
+    _invalidate_user_cache(uid)
+    _reset_rate.pop(f"email:{doc.get('email', '')}", None)
+
+    prog = progress_col.find_one({"user_id": uid}, {"_id": 0}) or {}
+    log.info("auth.password_reset user=%s", uid)
+    try:
+        analytics_col.insert_one({"event": "password_reset", "user_id": uid,
+                                  "data": {}, "ts": datetime.utcnow().isoformat()})
+    except Exception:
+        pass
+    return TokenOut(token=_make_token(uid), user=_public_user(user),
+                    progress={"current_career": prog.get("current_career"),
+                              "current_day": prog.get("current_day", 0)})
+
 # Collections that hold per-user data. Used by /api/profile/history and DELETE /api/auth/account.
-_USER_DATA_COLS_BY_USER_ID = ("progress_col", "interviews_col", "user_scenarios_col")
+_USER_DATA_COLS_BY_USER_ID = ("progress_col", "interviews_col", "user_scenarios_col",
+                              "password_resets_col")
 _USER_DATA_COLS_BY_SIM_ID = (
     "emails_col", "tasks_col", "sheets_col", "invoices_col", "evals_col",
     "memory_col", "actions_col", "agent_comms_col",

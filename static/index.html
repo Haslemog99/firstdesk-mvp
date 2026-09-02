@@ -121,6 +121,10 @@ button{cursor:pointer}
 .auth-btn:active{transform:translateY(1px)}
 .auth-btn:disabled{background:#27272a;color:#71717a;cursor:not-allowed}
 .auth-err{color:#fca5a5;font-size:12px;margin-top:12px;min-height:16px;letter-spacing:-0.005em}
+.auth-note{color:#86efac;font-size:12.5px;line-height:1.55;margin-top:10px;letter-spacing:-0.005em}
+.auth-note:empty{display:none}
+.auth-linkbtn{background:none;border:none;color:#a78bfa;font-family:inherit;font-size:12px;cursor:pointer;padding:0;letter-spacing:-0.005em;transition:color .12s}
+.auth-linkbtn:hover{color:#c4b5fd;text-decoration:underline}
 .auth-demo{margin-top:18px;padding-top:18px;border-top:1px solid rgba(255,255,255,0.05);font-size:12px;color:#71717a;letter-spacing:-0.005em}
 .auth-demo-btn{background:none;border:none;color:#a1a1aa;font-family:inherit;font-size:12px;cursor:pointer;padding:0;letter-spacing:-0.005em;transition:color .12s}
 .auth-demo-btn:hover{color:#fafaf9}
@@ -1191,20 +1195,25 @@ button{cursor:pointer}
 <div class="auth-card">
 <h2 id="authTitle">Welcome back</h2>
 <div class="auth-sub" id="authSub">Sign in to continue your training.</div>
-<div class="auth-tabs">
+<div class="auth-tabs" id="authTabs">
 <div class="auth-tab on" id="tabSignin" onclick="setAuthMode('signin')">Sign in</div>
 <div class="auth-tab" id="tabSignup" onclick="setAuthMode('signup')">Create account</div>
 </div>
 <form class="auth-form" id="authForm" onsubmit="submitAuth(event)" autocomplete="on">
 <div class="field" id="nameField" style="display:none"><label>Name</label><input type="text" id="iName" placeholder="Alex Morgan" autocomplete="name"></div>
-<div class="field"><label>Email</label><input type="email" id="iEmail" placeholder="you@email.com" autocomplete="email" required></div>
-<div class="field"><label>Password</label><input type="password" id="iPwd" placeholder="At least 8 characters" autocomplete="current-password" required></div>
+<div class="field" id="emailField"><label>Email</label><input type="email" id="iEmail" placeholder="you@email.com" autocomplete="email" required></div>
+<div class="field" id="pwdField"><label id="pwdLabel">Password</label><input type="password" id="iPwd" placeholder="At least 8 characters" autocomplete="current-password" required></div>
+<div id="forgotRow" style="text-align:right;margin:-6px 0 4px"><button type="button" class="auth-linkbtn" onclick="setAuthMode('forgot')">Forgot password?</button></div>
 <div class="field" id="pwd2Field" style="display:none"><label>Confirm password</label><input type="password" id="iPwd2" placeholder="Re-enter password" autocomplete="new-password"></div>
 <div class="field" id="consentField" style="display:none;margin-top:4px"><label style="display:flex;align-items:flex-start;gap:8px;cursor:pointer;font-weight:400;font-size:12px;line-height:1.5;color:#a1a1aa"><input type="checkbox" id="iConsent" style="margin-top:3px;flex:0 0 auto;width:14px;height:14px;cursor:pointer"><span style="flex:1 1 auto;min-width:0">I agree to the <a href="#" onclick="event.preventDefault();alert('FirstDesk Privacy Policy\\n\\n• We store your email, name, and simulation progress so you can resume training.\\n• Passwords are hashed; we never see or store your plaintext password.\\n• Your data is not shared with third parties.\\n• You can delete your account and all data at any time from the dashboard.')" style="color:#a78bfa;text-decoration:underline">Privacy Policy</a></span></label></div>
 <button type="submit" class="auth-btn" id="authBtn">Sign in</button>
 <div class="auth-err" id="authErr"></div>
+<div class="auth-note" id="authNote"></div>
+<div id="authAlt">
 <div style="margin-top:14px;padding-top:14px;border-top:1px solid rgba(255,255,255,0.06);text-align:center"><div style="font-size:11px;color:#52525b;margin-bottom:8px">or</div><button type="button" class="auth-demo-btn" onclick="tryAsGuest()" style="background:transparent;border:1px solid rgba(255,255,255,0.10);color:#cbd5e1;padding:8px 16px;border-radius:8px;font-size:12.5px;cursor:pointer;width:100%">Try without account →</button><div style="font-size:10.5px;color:#52525b;margin-top:6px">Guest progress is not saved permanently.</div></div>
 <div class="auth-demo" id="authDemo" style="margin-top:14px">Reviewing? <button type="button" class="auth-demo-btn" onclick="useDemo()">Use demo account →</button></div>
+</div>
+<div id="backToSigninRow" style="display:none;margin-top:16px;text-align:center"><button type="button" class="auth-linkbtn" onclick="setAuthMode('signin')">← Back to sign in</button></div>
 </form>
 </div>
 </div>
@@ -1549,9 +1558,80 @@ function showDesktop(){document.body.classList.add('desk-mode');document.getElem
 function _syncGuestBanner(){const b=document.getElementById('guestBanner');if(!b)return;const isGuest=!!(currentUser&&currentUser.is_guest);const onDesktop=document.body.classList.contains('desk-mode');b.classList.toggle('on',isGuest&&onDesktop)}
 let authMode='signin';
 function _errMsg(d){if(!d)return'';const x=d.detail!==undefined?d.detail:(d.message||d.error);if(!x)return'';if(typeof x==='string')return x;if(Array.isArray(x))return x.map(v=>(v&&(v.msg||v.message))||'').filter(Boolean).join('; ')||'';if(typeof x==='object')return x.message||x.error||x.msg||(d.message||d.error||'');return String(x)}
-function setAuthMode(m){authMode=m;document.getElementById('tabSignin').classList.toggle('on',m==='signin');document.getElementById('tabSignup').classList.toggle('on',m==='signup');document.getElementById('nameField').style.display=m==='signup'?'block':'none';const pf2=document.getElementById('pwd2Field');if(pf2)pf2.style.display=m==='signup'?'block':'none';const cf=document.getElementById('consentField');if(cf)cf.style.display=m==='signup'?'block':'none';document.getElementById('authTitle').textContent=m==='signup'?'Create your desk':'Welcome back';document.getElementById('authSub').textContent=m==='signup'?'Start your training. We save your progress.':'Sign in to continue your training.';document.getElementById('authBtn').textContent=m==='signup'?'Create account':'Sign in';document.getElementById('authErr').textContent='';document.getElementById('iPwd').setAttribute('autocomplete',m==='signup'?'new-password':'current-password');const p2=document.getElementById('iPwd2');if(p2)p2.value=''}
+let resetToken='';
+const AUTH_COPY={
+  signin:['Welcome back','Sign in to continue your training.','Sign in'],
+  signup:['Create your desk','Start your training. We save your progress.','Create account'],
+  forgot:['Reset your password','Enter your email and we will send you a reset link.','Send reset link'],
+  reset:['Choose a new password','Pick something at least 8 characters long.','Save password']
+};
+function setAuthMode(m){
+  authMode=m;
+  const isIn=m==='signin',isUp=m==='signup',isForgot=m==='forgot',isReset=m==='reset';
+  const show=(id,on,disp)=>{const el=document.getElementById(id);if(el)el.style.display=on?(disp||'block'):'none'};
+  show('authTabs',isIn||isUp,'flex');
+  document.getElementById('tabSignin').classList.toggle('on',isIn);
+  document.getElementById('tabSignup').classList.toggle('on',isUp);
+  show('nameField',isUp);
+  show('emailField',!isReset);
+  show('pwdField',!isForgot);
+  show('pwd2Field',isUp||isReset);
+  show('consentField',isUp);
+  show('forgotRow',isIn);
+  show('authAlt',isIn||isUp);
+  show('backToSigninRow',isForgot||isReset);
+  // A hidden input that is still `required` blocks submit with an unfocusable
+  // validation error, so the flag has to move with the field.
+  const iEmail=document.getElementById('iEmail'),iPwd=document.getElementById('iPwd');
+  iEmail.required=!isReset;iPwd.required=!isForgot;
+  const copy=AUTH_COPY[m]||AUTH_COPY.signin;
+  document.getElementById('authTitle').textContent=copy[0];
+  document.getElementById('authSub').textContent=copy[1];
+  const btn=document.getElementById('authBtn');btn.style.display='';btn.disabled=false;btn.textContent=copy[2];
+  document.getElementById('authErr').textContent='';
+  document.getElementById('authNote').textContent='';
+  const lbl=document.getElementById('pwdLabel');if(lbl)lbl.textContent=isReset?'New password':'Password';
+  iPwd.setAttribute('autocomplete',(isUp||isReset)?'new-password':'current-password');
+  const p2=document.getElementById('iPwd2');if(p2)p2.value='';
+  if(isReset)iPwd.value='';
+}
+async function _submitForgot(){
+  const email=document.getElementById('iEmail').value.trim();
+  const btn=document.getElementById('authBtn'),err=document.getElementById('authErr'),note=document.getElementById('authNote');
+  err.textContent='';note.textContent='';
+  btn.disabled=true;const orig=btn.textContent;btn.textContent='…';
+  try{
+    await _origFetch(A+'/api/auth/forgot-password',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email})});
+    // The server answers identically whether or not the account exists, so the
+    // wording here must not imply anything either.
+    note.textContent='If an account exists for '+email+', a reset link is on its way. It expires in 60 minutes. Check your spam folder if it does not arrive.';
+    document.getElementById('emailField').style.display='none';
+    btn.style.display='none';
+  }catch(ex){err.textContent='Network error. Please try again.'}
+  finally{btn.disabled=false;btn.textContent=orig}
+}
+async function _submitReset(){
+  const pwd=document.getElementById('iPwd').value;
+  const pwd2=(document.getElementById('iPwd2')||{}).value||'';
+  const btn=document.getElementById('authBtn'),err=document.getElementById('authErr');
+  err.textContent='';
+  if(pwd.length<8){err.textContent='Password must be at least 8 characters.';return}
+  if(pwd!==pwd2){err.textContent='Passwords do not match.';return}
+  btn.disabled=true;const orig=btn.textContent;btn.textContent='…';
+  try{
+    const r=await _origFetch(A+'/api/auth/reset-password',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token:resetToken,password:pwd})});
+    const d=await r.json();
+    if(!r.ok){err.textContent=_errMsg(d)||'That reset link is no longer valid. Request a new one.';return}
+    resetToken='';
+    localStorage.setItem(TKEY,d.token);currentUser=d.user;
+    showLanding();
+  }catch(ex){err.textContent='Network error. Please try again.'}
+  finally{btn.disabled=false;btn.textContent=orig}
+}
 async function submitAuth(e){
   e.preventDefault();
+  if(authMode==='forgot')return _submitForgot();
+  if(authMode==='reset')return _submitReset();
   const email=document.getElementById('iEmail').value.trim();
   const pwd=document.getElementById('iPwd').value;
   const name=document.getElementById('iName').value.trim();
@@ -1613,6 +1693,15 @@ async function loadDashboard(){
 }
 function useDemo(){setAuthMode('signin');document.getElementById('iEmail').value='demo@firstdesk.app';document.getElementById('iPwd').value='firstdesk2026';document.getElementById('authForm').requestSubmit()}
 async function checkAuth(){
+  const rt=new URLSearchParams(location.search).get('reset');
+  if(rt){
+    resetToken=rt;
+    // Strip the token before anything else so it cannot leak through browser
+    // history, a bookmark, or a Referer header on the next request.
+    history.replaceState(null,'',location.pathname);
+    showAuth();setAuthMode('reset');
+    return;
+  }
   const t=localStorage.getItem(TKEY);
   if(!t){showAuth();return}
   try{
