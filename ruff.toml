@@ -1,0 +1,17 @@
+line-length = 200
+target-version = "py310"
+
+[lint]
+# Start with the high-signal correctness rules. Style-only rules stay off so
+# the existing dense-dict seed data does not drown real findings.
+# The codebase deliberately uses one-line `if x: return` style, so E701/E702/
+# E401 stay off; everything selected here catches real defects.
+select = ["E711", "E712", "E713", "E714", "E722", "E9", "F", "B", "UP032", "RUF010"]
+ignore = [
+    "B008",  # FastAPI Depends()/Query() defaults
+    "B904",
+    "B007",
+]
+
+[lint.per-file-ignores]
+"test_*.py" = ["F841", "S102"]

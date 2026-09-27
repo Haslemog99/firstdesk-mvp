@@ -46,9 +46,10 @@ import re
 import uuid
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field, asdict
-from datetime import datetime
+
+from utctime import utcnow
 from pathlib import Path
-from typing import Any, Iterable, Optional, Sequence
+from typing import Any, Optional, Sequence
 
 import httpx
 
@@ -60,15 +61,23 @@ log = logging.getLogger("firstdesk.scenario")
 # Domain types
 # ──────────────────────────────────────────────────────────────────
 
-VALID_CAREERS = ("accountant", "cybersecurity", "marketing", "developer")
+VALID_CAREERS = ("accountant", "cybersecurity", "marketing", "developer",
+                 "procurement", "hr", "pm", "grc")
 
 # Each career maps to the canonical tool palette the simulator already supports.
 # Generated tasks must reference 3–5 of these. Anything outside is dropped.
+# Must cover every career in app.CAREER_CONFIGS: an empty palette makes
+# ScenarioExtractor.extract() bail before it calls the LLM, so a pasted JD
+# classified into a missing career can never produce a scenario.
 CAREER_TOOL_PALETTE: dict[str, tuple[str, ...]] = {
-    "accountant":    ("outlook", "sage",       "tasks", "slack", "sheets"),
-    "cybersecurity": ("outlook", "siem",       "tasks", "slack", "jira"),
-    "marketing":     ("outlook", "campaigns",  "tasks", "slack", "analytics"),
-    "developer":     ("outlook", "jira",       "tasks", "slack", "ci"),
+    "accountant":    ("outlook", "sage",         "tasks", "slack", "sheets"),
+    "cybersecurity": ("outlook", "siem",         "tasks", "slack", "jira"),
+    "marketing":     ("outlook", "campaigns",    "tasks", "slack", "analytics"),
+    "developer":     ("outlook", "jira",         "tasks", "slack", "ci"),
+    "procurement":   ("outlook", "po_system",    "tasks", "slack", "vendors"),
+    "hr":            ("outlook", "lms",          "tasks", "slack", "pipeline"),
+    "pm":            ("outlook", "roadmap",      "tasks", "slack", "requests"),
+    "grc":           ("outlook", "riskregister", "tasks", "slack", "controls"),
 }
 
 DEFAULT_SLACK_CHANNELS: dict[str, tuple[str, ...]] = {
@@ -76,6 +85,10 @@ DEFAULT_SLACK_CHANNELS: dict[str, tuple[str, ...]] = {
     "cybersecurity": ("#soc-alerts", "#incidents", "#general"),
     "marketing":     ("#marketing", "#partnerships", "#general"),
     "developer":     ("#engineering", "#incidents", "#general"),
+    "procurement":   ("#procurement", "#finance", "#general"),
+    "hr":            ("#people", "#learning", "#general"),
+    "pm":            ("#product", "#growth", "#general"),
+    "grc":           ("#compliance", "#security", "#general"),
 }
 
 
@@ -118,7 +131,7 @@ class ScenarioTemplate:
     tool_data: dict[str, list[dict]]       # keyed by tool name → seed rows
     system_events: list[dict]
     tools: list[dict] = field(default_factory=list)  # generic tool docs (table/sql/...)
-    created_at: str = field(default_factory=lambda: datetime.utcnow().isoformat())
+    created_at: str = field(default_factory=lambda: utcnow().isoformat())
 
 
 # ──────────────────────────────────────────────────────────────────
@@ -740,7 +753,6 @@ class Materializer:
         company = template.company
 
         emails_to_insert = []
-        now = datetime.utcnow().strftime("%H:%M")
         for e in template.emails:
             persona = self._persona_for(cfg, e["from_role_key"])
             eid = f"e_{uuid.uuid4().hex[:6]}"
@@ -818,7 +830,7 @@ class Materializer:
                     "category": spec.get("category", "generic"),
                     "data": spec["data"],
                     "actions_log": [],
-                    "created_at": datetime.utcnow().isoformat(),
+                    "created_at": utcnow().isoformat(),
                 })
             if tool_docs:
                 self.cols.tools_col.insert_many(tool_docs)
@@ -867,7 +879,7 @@ def _slack_msg(sim_id: str, channel: str, author: str, text: str) -> dict:
         "channel": channel,
         "author": author,
         "text": text,
-        "ts": datetime.utcnow().isoformat(),
+        "ts": utcnow().isoformat(),
     }
 
 
@@ -922,7 +934,7 @@ class ScenarioEngine:
                 # cache the JD
                 self.jobs_col.update_one(
                     {"ext_id": job.ext_id},
-                    {"$set": {**asdict(job), "cached_at": datetime.utcnow().isoformat()}},
+                    {"$set": {**asdict(job), "cached_at": utcnow().isoformat()}},
                     upsert=True,
                 )
                 new_jobs += 1
@@ -981,7 +993,7 @@ class ScenarioEngine:
             tool_data=chosen.get("tool_data", {}),
             system_events=chosen.get("system_events", []),
             tools=chosen.get("tools", []),
-            created_at=chosen.get("created_at", datetime.utcnow().isoformat()),
+            created_at=chosen.get("created_at", utcnow().isoformat()),
         )
 
     def mark_seen(self, user_id: str, scenario_id: str, career: str) -> None:
@@ -990,7 +1002,7 @@ class ScenarioEngine:
             {"$push": {"seen": {
                 "scenario_id": scenario_id,
                 "career": career,
-                "ts": datetime.utcnow().isoformat(),
+                "ts": utcnow().isoformat(),
             }}},
             upsert=True,
         )

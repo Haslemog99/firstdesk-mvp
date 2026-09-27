@@ -11,10 +11,10 @@
 
 from __future__ import annotations
 
-import json
 import re
 import uuid
-from datetime import datetime
+
+from utctime import utcnow
 from typing import Any, Optional
 
 # ═══════════════════════════════════════════════════════════
@@ -308,14 +308,14 @@ class WorkplacePhysicsEngine:
             "cc": t.get("cc", ""),
             "subject": t.get("subject", "Update"),
             "body": t.get("body", ""),
-            "time": datetime.utcnow().strftime("%H:%M"),
+            "time": utcnow().strftime("%H:%M"),
             "read": False,
             "replied": False,
             "priority": t.get("priority", "medium"),
             "category": "physics_triggered",
             "requires_action": True,
             "triggered_by": "workplace_physics",
-            "created_at": datetime.utcnow().isoformat(),
+            "created_at": utcnow().isoformat(),
         }
         self.emails_col.insert_one(email)
         return {"type": "agent_email", "id": eid, "from": from_agent, "subject": email["subject"]}
@@ -329,7 +329,7 @@ class WorkplacePhysicsEngine:
             "text": t.get("message", ""),
             "sender": "System",
             "sender_type": "bot",
-            "timestamp": datetime.utcnow().isoformat(),
+            "timestamp": utcnow().isoformat(),
             "triggered_by": "workplace_physics",
         }
         self.slack_col.insert_one(msg)
@@ -346,7 +346,7 @@ class WorkplacePhysicsEngine:
             "description": t.get("description", ""),
             "status": "open",
             "type": "incident",
-            "created_at": datetime.utcnow().isoformat(),
+            "created_at": utcnow().isoformat(),
             "triggered_by": "workplace_physics",
         }
         self.jira_col.insert_one(doc)
@@ -367,7 +367,7 @@ class WorkplacePhysicsEngine:
         if tool:
             self.tools_col.update_one(
                 {"_id": tool["_id"]},
-                {"$push": {"physics_flags": {"action": action, "message": t.get("message", ""), "ts": datetime.utcnow().isoformat()}}}
+                {"$push": {"physics_flags": {"action": action, "message": t.get("message", ""), "ts": utcnow().isoformat()}}}
             )
         return {"type": "tool_update", "tool": tool_name, "action": action, "applied": bool(tool)}
 
@@ -380,7 +380,7 @@ class WorkplacePhysicsEngine:
             "note": t.get("note", ""),
             "points": pts,
             "source": "workplace_physics",
-            "ts": datetime.utcnow().isoformat(),
+            "ts": utcnow().isoformat(),
         })
         if pts:
             # Roll into the same per-session score_adj the rest of the app uses,
