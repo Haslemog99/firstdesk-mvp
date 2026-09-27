@@ -36,7 +36,7 @@ Optional: `LANGSMITH_API_KEY` (traces LLM runs at https://smith.langchain.com), 
 ## Tests
 The contract tests are standalone scripts (no pytest, no network, no DB):
 ```bash
-for t in test_grc_model.py test_noise_alerts.py test_edr_telemetry.py test_password_reset.py test_retention.py; do python3 "$t"; done
+for t in test_grc_model.py test_noise_alerts.py test_edr_telemetry.py test_password_reset.py test_retention.py test_career_palettes.py; do python3 "$t"; done
 ```
 `test_grc_writeback.py` needs a reachable `MONGO_URI`; `test_e2e_days.py` needs a
 running server. Lint with `ruff check .` (config in `ruff.toml`). CI runs both

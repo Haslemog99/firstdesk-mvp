@@ -61,15 +61,23 @@ log = logging.getLogger("firstdesk.scenario")
 # Domain types
 # ──────────────────────────────────────────────────────────────────
 
-VALID_CAREERS = ("accountant", "cybersecurity", "marketing", "developer")
+VALID_CAREERS = ("accountant", "cybersecurity", "marketing", "developer",
+                 "procurement", "hr", "pm", "grc")
 
 # Each career maps to the canonical tool palette the simulator already supports.
 # Generated tasks must reference 3–5 of these. Anything outside is dropped.
+# Must cover every career in app.CAREER_CONFIGS: an empty palette makes
+# ScenarioExtractor.extract() bail before it calls the LLM, so a pasted JD
+# classified into a missing career can never produce a scenario.
 CAREER_TOOL_PALETTE: dict[str, tuple[str, ...]] = {
-    "accountant":    ("outlook", "sage",       "tasks", "slack", "sheets"),
-    "cybersecurity": ("outlook", "siem",       "tasks", "slack", "jira"),
-    "marketing":     ("outlook", "campaigns",  "tasks", "slack", "analytics"),
-    "developer":     ("outlook", "jira",       "tasks", "slack", "ci"),
+    "accountant":    ("outlook", "sage",         "tasks", "slack", "sheets"),
+    "cybersecurity": ("outlook", "siem",         "tasks", "slack", "jira"),
+    "marketing":     ("outlook", "campaigns",    "tasks", "slack", "analytics"),
+    "developer":     ("outlook", "jira",         "tasks", "slack", "ci"),
+    "procurement":   ("outlook", "po_system",    "tasks", "slack", "vendors"),
+    "hr":            ("outlook", "lms",          "tasks", "slack", "pipeline"),
+    "pm":            ("outlook", "roadmap",      "tasks", "slack", "requests"),
+    "grc":           ("outlook", "riskregister", "tasks", "slack", "controls"),
 }
 
 DEFAULT_SLACK_CHANNELS: dict[str, tuple[str, ...]] = {
@@ -77,6 +85,10 @@ DEFAULT_SLACK_CHANNELS: dict[str, tuple[str, ...]] = {
     "cybersecurity": ("#soc-alerts", "#incidents", "#general"),
     "marketing":     ("#marketing", "#partnerships", "#general"),
     "developer":     ("#engineering", "#incidents", "#general"),
+    "procurement":   ("#procurement", "#finance", "#general"),
+    "hr":            ("#people", "#learning", "#general"),
+    "pm":            ("#product", "#growth", "#general"),
+    "grc":           ("#compliance", "#security", "#general"),
 }
 
 
