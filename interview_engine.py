@@ -16,7 +16,8 @@ import logging
 import re
 import secrets
 from dataclasses import dataclass
-from datetime import datetime
+
+from utctime import utcnow
 from typing import Any, Optional
 
 log = logging.getLogger("firstdesk.interview")
@@ -340,7 +341,7 @@ class InterviewEngine:
             "improvements": improvements,
             "coaching_tip": tip,
             "consistency_flag": flag,
-            "answered_at": datetime.utcnow().isoformat(),
+            "answered_at": utcnow().isoformat(),
         }
 
     def generate_round_feedback(self, round_data: dict) -> dict:
@@ -450,7 +451,7 @@ class InterviewEngine:
             "scores": {"content": 0, "delivery": 0, "body_language": 0,
                        "interview_score": 0, "simulation_score": None,
                        "employability_score": 0},
-            "created_at": datetime.utcnow().isoformat(),
+            "created_at": utcnow().isoformat(),
             "completed_at": None,
         }
         self.interviews_col.insert_one(doc)
@@ -510,7 +511,7 @@ class InterviewEngine:
         self.interviews_col.update_one(
             {"id": interview_id, "user_id": user_id},
             {"$set": {"scores": scores, "status": "completed",
-                      "completed_at": datetime.utcnow().isoformat()}},
+                      "completed_at": utcnow().isoformat()}},
         )
         doc["scores"] = scores
         doc["status"] = "completed"

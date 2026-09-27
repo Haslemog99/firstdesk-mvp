@@ -21,6 +21,7 @@ from contextlib import asynccontextmanager
 from html import escape as _html_escape
 from typing import Annotated, Any, Optional
 from urllib.parse import quote
+
 from fastapi import BackgroundTasks, FastAPI, Header, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
@@ -29,6 +30,8 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, BeforeValidator, Field, field_validator
 from pymongo import MongoClient
 from pymongo.errors import PyMongoError
+
+from utctime import utcnow
 
 # ── STRUCTURED LOGGING ────────────────────────────────────────────
 # One log line per event with a request-id correlation token, so a single
@@ -58,34 +61,19 @@ from typing_extensions import TypedDict
 
 from scenario_engine import (
     MaterializerCollections,
-    Materializer,
     ScenarioEngine,
-    ScenarioExtractor,
-    SeedFileSource,
-    AdzunaSource,
     build_default_engine,
     rewrite_in_sim_surfaces,
     looks_like,
     HR_PORTAL_HINTS,
     TRAINING_HINTS,
-    IT_SETUP_HINTS,
     FILES_HINTS,
-    CI_HINTS,
-    MEETING_HINTS,
     ATTACHMENT_HINTS,
-    HR_PORTAL_LINK,
-    TRAINING_LINK,
-    IT_SETUP_LINK,
-    FILES_LINK,
-    CI_LINK,
-    MEETING_LINK,
 )
 from tool_dispatch import (
-    SUPPORTED_TYPES as TOOL_SUPPORTED_TYPES,
     DEFAULT_ICON as TOOL_DEFAULT_ICON,
     DEFAULT_TINT as TOOL_DEFAULT_TINT,
     dispatch_action as tool_dispatch_action,
-    normalise_tool_spec,
 )
 from workplace_physics import WorkplacePhysicsEngine, WORKPLACE_PHYSICS
 
@@ -195,14 +183,14 @@ def _ensure_bootstrap():
                    sheets_col, interviews_col, user_scenarios_col, grc_col,
                    hr_onboarding_col, training_col, it_setup_col, files_col):
             try: _c.create_index("simulation_id")
-            except Exception: pass
+            except Exception: log.debug("index.create_failed", exc_info=True)
         try:
             password_resets_col.create_index("token_hash", unique=True)
             password_resets_col.create_index("user_id")
             # expires_at must be a real BSON datetime for this to sweep anything.
             password_resets_col.create_index("expires_at", expireAfterSeconds=0)
         except Exception:
-            pass
+            log.debug("index.create_failed col=password_resets", exc_info=True)
         try:
             sessions_col.create_index("session_id", unique=True)
             sessions_col.create_index("user_id")
@@ -211,7 +199,7 @@ def _ensure_bootstrap():
             analytics_col.create_index([("ts", -1)])
             analytics_col.create_index("event")
         except Exception:
-            pass
+            log.debug("index.create_failed", exc_info=True)
         if not users_col.find_one({"email": DEMO_EMAIL}):
             uid = "u_demo000000000"
             users_col.insert_one({
@@ -219,13 +207,13 @@ def _ensure_bootstrap():
                 "email": DEMO_EMAIL,
                 "name": "Demo User",
                 "password_hash": _hash_pw(DEMO_PASSWORD),
-                "created_at": datetime.utcnow().isoformat(),
+                "created_at": utcnow().isoformat(),
                 "is_demo": True,
             })
             progress_col.insert_one({
                 "user_id": uid, "current_career": None, "current_day": 0,
                 "days_completed": 0, "cumulative_score": 0,
-                "started_at": datetime.utcnow().isoformat(),
+                "started_at": utcnow().isoformat(),
             })
             log.info("bootstrap.seed_demo_user email=%s", DEMO_EMAIL)
         _bootstrap_done = True
@@ -332,7 +320,7 @@ def _tag_day1_artifacts() -> None:
                 {"$set": {"day": 1}},
             )
         except Exception:
-            pass
+            log.debug("backfill.day_failed", exc_info=True)
 
 # ── EXPERIENCE-LEVEL = DIFFICULTY TIER ───────────────────────────
 # The three levels are genuine difficulty tiers, not just tone changes.
@@ -969,7 +957,7 @@ def _hydrate_email_surfaces(email: dict) -> dict:
                     {"$set": {"attachments": atts}},
                 )
             except Exception:
-                pass
+                log.debug("email.attachment_persist_failed", exc_info=True)
     return e
 
 
@@ -2414,7 +2402,7 @@ def _seed_marketing_artifacts(cfg):
             "tool_id":f"tl_cc_{_sim}","simulation_id":_sim,"scenario_id":None,
             "name":"Content Calendar","tool_type":"calendar","icon":"📅","tint":"#0D9488",
             "category":"marketing","data":{"items":calendar},"actions_log":[],
-            "created_at":datetime.utcnow().isoformat(),
+            "created_at":utcnow().isoformat(),
         })
     if not list(system_events_col.find({"simulation_id":_sim,"tool":"campaigns"}).limit(1)):
         system_events_col.insert_one({"id":"ev_mkt1","simulation_id":_sim,"type":"outage","tool":"campaigns","trigger_at":8,"end_at":11,"start_msg":"Hootsuite is experiencing an outage. Social media scheduling is temporarily unavailable.","end_msg":"Hootsuite is back. Your scheduled posts are intact.","points_for_report":5,"triggered":False,"resolved":False})
@@ -2586,10 +2574,7 @@ def _seed_procurement_artifacts(cfg):
     Idempotent per simulation_id. Uses generic tools_col so the existing kanban/table
     renderers on the frontend pick these up automatically."""
     _sim = sim_id()
-    teammate = cfg["teammate"]["name"]
-    manager = cfg["manager"]["name"]
     director = cfg["director"]["name"]
-    requester = cfg["client"]["name"]
     # ── Purchase Orders (kanban) ──────────────────────────────
     po_cards = [
         {"id":"PO-2410","title":"Cursor Pro for Teams — 24 seats","vendor":"Cursor (Anysphere Inc.)","category":"AI dev tooling","amount_gbp":7920,"currency":"GBP","term":"annual","requester":"Marcus Hale (Eng Manager)","cost_center":"ENG-PLATFORM",
@@ -2672,7 +2657,7 @@ def _seed_procurement_artifacts(cfg):
             "name":"PO Approvals","tool_type":"kanban","icon":"📝","tint":"#0F766E",
             "category":"procurement","summary":"Purchase orders moving through the approval pipeline. Pick the right column.",
             "data":{"columns":["draft","in_review","pending_approval","approved","escalation","rejected"],"cards":po_cards},
-            "actions_log":[],"created_at":datetime.utcnow().isoformat(),
+            "actions_log":[],"created_at":utcnow().isoformat(),
         })
         # Vendor Catalog — table
         tools_col.delete_many({"simulation_id":_sim,"name":"Vendor Catalog"})
@@ -2681,7 +2666,7 @@ def _seed_procurement_artifacts(cfg):
             "name":"Vendor Catalog","tool_type":"table","icon":"🗂","tint":"#7C3AED",
             "category":"procurement","summary":"Active and prospective vendors. Includes contract end dates, security review status, and ARR.",
             "data":{"columns":["vendor_id","name","category","status","contract_end","arr_gbp","security_review","soc2","dpa","owner","note"],"rows":vendors,"expected_corrections":[]},
-            "actions_log":[],"created_at":datetime.utcnow().isoformat(),
+            "actions_log":[],"created_at":utcnow().isoformat(),
         })
     if not list(system_events_col.find({"simulation_id":_sim,"tool":"po_system"}).limit(1)):
         system_events_col.insert_many([
@@ -2719,7 +2704,6 @@ def _seed_hr_artifacts(cfg):
     renderers on the frontend pick these up automatically."""
     _sim = sim_id()
     teammate = cfg["teammate"]["name"]
-    manager = cfg["manager"]["name"]
     director = cfg["director"]["name"]
     # ── Training Programs (kanban) ─────────────────────────────
     program_cards = [
@@ -2795,7 +2779,7 @@ def _seed_hr_artifacts(cfg):
             "name":"Training Programs","tool_type":"kanban","icon":"🎓","tint":"#0EA5E9",
             "category":"learning","summary":"L&D programs moving through design, scheduling, in-session, completed. Pick the right column.",
             "data":{"columns":["proposed","designing","scheduled","in_session","completed","on_hold"],"cards":program_cards},
-            "actions_log":[],"created_at":datetime.utcnow().isoformat(),
+            "actions_log":[],"created_at":utcnow().isoformat(),
         })
         tools_col.delete_many({"simulation_id":_sim,"name":"Learner Pipeline"})
         tools_col.insert_one({
@@ -2803,7 +2787,7 @@ def _seed_hr_artifacts(cfg):
             "name":"Learner Pipeline","tool_type":"table","icon":"👥","tint":"#7C3AED",
             "category":"learning","summary":"Active and requested learners across all programs. Includes completion %, due dates, and manager.",
             "data":{"columns":["learner_id","name","dept","program","status","enrolled_date","due_date","completion_pct","manager","notes"],"rows":learners,"expected_corrections":[]},
-            "actions_log":[],"created_at":datetime.utcnow().isoformat(),
+            "actions_log":[],"created_at":utcnow().isoformat(),
         })
     if not list(system_events_col.find({"simulation_id":_sim,"tool":"lms"}).limit(1)):
         system_events_col.insert_many([
@@ -2841,7 +2825,6 @@ def _seed_pm_artifacts(cfg):
     renderers on the frontend pick these up automatically."""
     _sim = sim_id()
     teammate = cfg["teammate"]["name"]
-    manager = cfg["manager"]["name"]
     director = cfg["director"]["name"]
     # ── Roadmap (kanban) ───────────────────────────────────────
     roadmap_cards = [
@@ -2917,7 +2900,7 @@ def _seed_pm_artifacts(cfg):
             "name":"Roadmap","tool_type":"kanban","icon":"🗺","tint":"#0EA5E9",
             "category":"product","summary":"Growth roadmap — features moving through discovery → build → review → launched. Pick the right column and the right narrative.",
             "data":{"columns":["backlog","discovery","in_build","in_review","launched","parked"],"cards":roadmap_cards},
-            "actions_log":[],"created_at":datetime.utcnow().isoformat(),
+            "actions_log":[],"created_at":utcnow().isoformat(),
         })
         tools_col.delete_many({"simulation_id":_sim,"name":"Feature Requests"})
         tools_col.insert_one({
@@ -2925,7 +2908,7 @@ def _seed_pm_artifacts(cfg):
             "name":"Feature Requests","tool_type":"table","icon":"📥","tint":"#F59E0B",
             "category":"product","summary":"Inbound requests from Sales, CS, and Product. Triage dupes, weak-evidence asks, and route what isn't Growth scope.",
             "data":{"columns":["req_id","title","source","requester","customers_affected","arr_impact_gbp","status","dupe_of","notes"],"rows":feature_requests,"expected_corrections":[]},
-            "actions_log":[],"created_at":datetime.utcnow().isoformat(),
+            "actions_log":[],"created_at":utcnow().isoformat(),
         })
     if not list(system_events_col.find({"simulation_id":_sim,"tool":"roadmap"}).limit(1)):
         system_events_col.insert_many([
@@ -2965,7 +2948,6 @@ def _seed_grc_artifacts(cfg):
     'accepted' without documented owner sign-off, never overstate posture."""
     _sim = sim_id()
     teammate = cfg["teammate"]["name"]
-    manager = cfg["manager"]["name"]
     director = cfg["director"]["name"]
     # ── Risk Register (kanban) ─────────────────────────────────
     # columns: identified → assessing → treating → monitoring → accepted → closed
@@ -3043,7 +3025,7 @@ def _seed_grc_artifacts(cfg):
             "name":"Risk Register","tool_type":"kanban","icon":"⚠️","tint":"#DC2626",
             "category":"grc","summary":"Enterprise risk register — risks moving through identified → assessing → treating → monitoring → accepted → closed. Put each risk in the column its evidence supports, escalate the board-level ones, and never let a risk sit in 'accepted' without a documented sign-off.",
             "data":{"columns":["identified","assessing","treating","monitoring","accepted","closed"],"cards":risk_cards},
-            "actions_log":[],"created_at":datetime.utcnow().isoformat(),
+            "actions_log":[],"created_at":utcnow().isoformat(),
         })
         tools_col.delete_many({"simulation_id":_sim,"name":"Control Library"})
         tools_col.insert_one({
@@ -3051,7 +3033,7 @@ def _seed_grc_artifacts(cfg):
             "name":"Control Library","tool_type":"table","icon":"🛡","tint":"#2563EB",
             "category":"grc","summary":"SOC 2 / HIPAA / ISO 27001 control library. Status must match evidence — a control is only 'implemented' if there's current, in-period evidence. The auditor samples these. Never inflate a status to make the library look complete.",
             "data":{"columns":["control_id","framework","title","owner","status","last_tested","evidence","notes"],"rows":controls,"expected_corrections":[]},
-            "actions_log":[],"created_at":datetime.utcnow().isoformat(),
+            "actions_log":[],"created_at":utcnow().isoformat(),
         })
     if not list(system_events_col.find({"simulation_id":_sim,"tool":"riskregister"}).limit(1)):
         system_events_col.insert_many([
@@ -3327,12 +3309,12 @@ def init_session(career, experience_level: str = "studied"):
             "experience_level": experience_level,
             "beginner_first_mistakes": [],   # tools where the first mistake has been forgiven
             "current_day": 1,                 # day-progression cursor
-            "started_at": datetime.utcnow().isoformat(),
+            "started_at": utcnow().isoformat(),
             # 2hr-real = 8hr-sim clock. Frontend ticks 09:00 → 17:00 over 2hrs.
-            "real_start_time": datetime.utcnow().isoformat(),
+            "real_start_time": utcnow().isoformat(),
             "auto_ended": False,
-            "last_activity_at": datetime.utcnow().isoformat(),
-            "last_clock_tick": datetime.utcnow().isoformat(),
+            "last_activity_at": utcnow().isoformat(),
+            "last_clock_tick": utcnow().isoformat(),
             "clock_paused_sec": 0,
         }},
         upsert=True,
@@ -3430,7 +3412,7 @@ def complete_task(task_id: str) -> str:
     blocked = _task_complete_block(t)
     if blocked:
         return f"Blocked: {blocked[1]}"
-    r = tasks_col.update_one({"id": task_id, "simulation_id": sim_id(), "review_status": {"$ne": "approved"}}, {"$set": {"status": "done", "review_status": "pending_review", "completed_at": datetime.utcnow().isoformat()}})
+    r = tasks_col.update_one({"id": task_id, "simulation_id": sim_id(), "review_status": {"$ne": "approved"}}, {"$set": {"status": "done", "review_status": "pending_review", "completed_at": utcnow().isoformat()}})
     if r.modified_count == 0: return "Not found or already reviewed."
     t = tasks_col.find_one({"id": task_id}, {"_id": 0})
     completion_credit = max(2, int(t["points"] * 0.2))
@@ -3671,7 +3653,7 @@ def get_session_state() -> str:
 @tool
 def add_performance_note(note: str) -> str:
     """Record a performance observation."""
-    sessions_col.update_one({"session_id": session_id()}, {"$push": {"performance_notes": {"note": note, "ts": datetime.utcnow().isoformat()}}})
+    sessions_col.update_one({"session_id": session_id()}, {"$push": {"performance_notes": {"note": note, "ts": utcnow().isoformat()}}})
     return f"Noted: {note}"
 
 @tool
@@ -3685,14 +3667,14 @@ def inject_task(title: str, description: str, priority: str, deadline: str, poin
 def inject_email(from_name: str, subject: str, body: str, priority: str) -> str:
     """Send a new email to user's inbox from any agent."""
     eid = f"e_{uuid.uuid4().hex[:6]}"
-    emails_col.insert_one({"id": eid, "simulation_id": sim_id(), "from_name": from_name, "from_role": "dynamic", "from_email": "dynamic", "to": "you", "subject": subject, "body": rewrite_in_sim_surfaces(body or ""), "time": datetime.utcnow().strftime("%H:%M"), "read": False, "replied": False, "priority": priority, "category": "dynamic", "requires_action": True, "injected": True})
+    emails_col.insert_one({"id": eid, "simulation_id": sim_id(), "from_name": from_name, "from_role": "dynamic", "from_email": "dynamic", "to": "you", "subject": subject, "body": rewrite_in_sim_surfaces(body or ""), "time": utcnow().strftime("%H:%M"), "read": False, "replied": False, "priority": priority, "category": "dynamic", "requires_action": True, "injected": True})
     return f"Email from {from_name}: '{subject}'"
 
 @tool
 def agent_to_agent_email(from_agent: str, to_agent: str, subject: str, body: str, cc_user: bool) -> str:
     """Send an email between agents. If cc_user=True, user sees it in their inbox. Used for inter-agent communication like manager reporting to HR about user's performance."""
     cid = f"ac_{uuid.uuid4().hex[:6]}"
-    agent_comms_col.insert_one({"id": cid, "simulation_id": sim_id(), "from_agent": from_agent, "to_agent": to_agent, "subject": subject, "body": rewrite_in_sim_surfaces(body or ""), "cc_user": cc_user, "visible_to_user": cc_user, "timestamp": datetime.utcnow().strftime("%H:%M")})
+    agent_comms_col.insert_one({"id": cid, "simulation_id": sim_id(), "from_agent": from_agent, "to_agent": to_agent, "subject": subject, "body": rewrite_in_sim_surfaces(body or ""), "cc_user": cc_user, "visible_to_user": cc_user, "timestamp": utcnow().strftime("%H:%M")})
     if cc_user:
         return f"Agent email: {from_agent} → {to_agent} (user CC'd): '{subject}'"
     return f"Agent email: {from_agent} → {to_agent} (private): '{subject}'"
@@ -3711,7 +3693,7 @@ def slack_post(channel: str, text: str) -> str:
         "id": f"sl_{uuid.uuid4().hex[:8]}",
         "simulation_id": sim_id(),
         "channel": ch, "author": "you", "text": text[:2000],
-        "ts": datetime.utcnow().isoformat(),
+        "ts": utcnow().isoformat(),
     })
     emit("slack_posted", {"channel": ch, "text": text})
     return f"Posted to {ch}: {text[:120]}"
@@ -3829,7 +3811,7 @@ def _compute_behavioral_fingerprint(s: dict, sim: str) -> dict:
         prio = (last_eval.get("dimensions") or {}).get("prioritisation")
         if prio is not None:
             try: prio_acc = round(min(1.0, max(0.0, float(prio) / 20.0)), 2)
-            except Exception: pass
+            except Exception: log.debug("prioritisation.parse_failed", exc_info=True)
 
     return {
         "time_to_first_action_sec": ttf,
@@ -3958,7 +3940,7 @@ def _compute_eod():
                 if not ca: continue
                 try:
                     mins.append((datetime.fromisoformat(ca) - rs).total_seconds() / 60.0 / max(1, len(done)))
-                except Exception: pass
+                except Exception: log.debug("task.completed_at_parse_failed", exc_info=True)
             avg_task_min = sum(mins) if mins else 12
         else:
             avg_task_min = 12
@@ -3991,12 +3973,6 @@ def _compute_eod():
     total = max(0, min(100, total))
     grade, label = _grade_for(total)
 
-    # Legacy-compat fields so existing /api/profile/history aggregation +
-    # any older UI keep working without changes.
-    completion_pts = sum(t.get("awarded_points", int(t.get("points", 0) * 0.2)) for t in done)
-    satisfaction = int(s.get("score_adj", 0))
-    siem_types = ["alert_triage", "correlation_bonus", "travel_check_bonus", "note_bonus"]
-    siem_points = sum(int(e.get("points", 0) or 0) for e in evals if e.get("type") in siem_types)
     notes = [n["note"] for n in (s.get("performance_notes", []) or [])]
     return {
         "simulation_id": sim, "type": "end_of_day_review", "career": career,
@@ -4024,7 +4000,7 @@ def _compute_eod():
         },
         "manager_notes": notes, "notes": notes,
         "behavioral_fingerprint": _compute_behavioral_fingerprint(s, sim),
-        "ts": datetime.utcnow().isoformat(),
+        "ts": utcnow().isoformat(),
     }
 
 @tool
@@ -4654,11 +4630,11 @@ def _campaign_to_analytics(p: dict):
     cid = p.get("campaign_id")
     campaigns_col.update_one(
         {"id": cid, "simulation_id": sim_id()},
-        {"$set": {"last_updated": datetime.utcnow().strftime("%H:%M"), "needs_review": True}},
+        {"$set": {"last_updated": utcnow().strftime("%H:%M"), "needs_review": True}},
     )
     _push_email(
         cfg["manager"],
-        f"Saw the campaign update — quick review",
+        "Saw the campaign update — quick review",
         f"Thanks, I noticed the campaign change. I'll review before it goes live and ping you if anything needs adjusting.\n\n{cfg['manager']['name'].split()[0]}",
         priority="low", category="cross_tool",
     )
@@ -4739,7 +4715,7 @@ def observe_tone(message: str) -> dict:
         reputation_col.update_one({"session_id": session_id()}, {"$inc": inc})
         reputation_col.update_one(
             {"session_id": session_id()},
-            {"$push": {"events": {"msg": message[:200], "tags": data, "ts": datetime.utcnow().isoformat()}}},
+            {"$push": {"events": {"msg": message[:200], "tags": data, "ts": utcnow().isoformat()}}},
         )
     return data
 
@@ -4750,7 +4726,7 @@ def _push_email(from_cfg, subject, body, priority="high", category="hr_escalatio
         "id": eid, "simulation_id": sim_id(),
         "from_name": from_cfg["name"], "from_role": from_cfg["role"], "from_email": from_cfg["email"],
         "to": "you", "subject": subject, "body": body,
-        "time": datetime.utcnow().strftime("%H:%M"),
+        "time": utcnow().strftime("%H:%M"),
         "read": False, "replied": False,
         "priority": priority, "category": category, "requires_action": True,
     })
@@ -4763,7 +4739,7 @@ def _push_agent_comm(from_name, to_name, subject, body):
         "from_agent": from_name, "to_agent": to_name,
         "subject": subject, "body": body,
         "cc_user": True, "visible_to_user": True,
-        "timestamp": datetime.utcnow().strftime("%H:%M"),
+        "timestamp": utcnow().strftime("%H:%M"),
     })
 
 FOLLOWUP_PROMPT = """You are roleplaying as {sender_name}, a {sender_role} at {company}. You sent an email titled "{subject}" with body:
@@ -4877,8 +4853,10 @@ async def _lifespan(_: FastAPI):
         janitor.cancel()
         try:
             await janitor
-        except Exception:
+        except asyncio.CancelledError:
             pass
+        except Exception:
+            log.debug("janitor.shutdown_error", exc_info=True)
         log.info("shutdown")
 
 app = FastAPI(title="FirstDesk", lifespan=_lifespan, docs_url="/api/docs", openapi_url="/api/openapi.json")
@@ -5217,7 +5195,7 @@ async def auth_signup(req: SignupReq) -> TokenOut:
     if users_col.find_one({"email": email}):
         raise HTTPException(409, "An account with that email already exists.")
     user_id = "u_" + secrets.token_hex(8)
-    now = datetime.utcnow().isoformat()
+    now = utcnow().isoformat()
     u = {
         "user_id": user_id,
         "email": email,
@@ -5232,11 +5210,11 @@ async def auth_signup(req: SignupReq) -> TokenOut:
     progress_col.insert_one({
         "user_id": user_id, "current_career": None, "current_day": 0,
         "days_completed": 0, "cumulative_score": 0,
-        "started_at": datetime.utcnow().isoformat(),
+        "started_at": utcnow().isoformat(),
     })
     log.info("auth.signup user=%s", user_id)
     try: analytics_col.insert_one({"event": "user_registered", "user_id": user_id, "data": {}, "ts": now})
-    except Exception: pass
+    except Exception: log.debug("analytics.insert_failed event=user_registered", exc_info=True)
     return TokenOut(token=_make_token(user_id), user=_public_user(u),
                     progress={"current_career": None, "current_day": 0})
 
@@ -5251,8 +5229,8 @@ async def auth_login(req: LoginReq) -> TokenOut:
         raise HTTPException(401, "Invalid email or password.")
     prog = progress_col.find_one({"user_id": u["user_id"]}, {"_id": 0}) or {}
     log.info("auth.login user=%s", u["user_id"])
-    try: analytics_col.insert_one({"event": "user_logged_in", "user_id": u["user_id"], "data": {}, "ts": datetime.utcnow().isoformat()})
-    except Exception: pass
+    try: analytics_col.insert_one({"event": "user_logged_in", "user_id": u["user_id"], "data": {}, "ts": utcnow().isoformat()})
+    except Exception: log.debug("analytics.insert_failed event=user_logged_in", exc_info=True)
     return {"token": _make_token(u["user_id"]), "user": _public_user(u),
             "progress": {"current_career": prog.get("current_career"), "current_day": prog.get("current_day", 0)}}
 
@@ -5277,7 +5255,7 @@ async def auth_guest() -> TokenOut:
     frontend can show a 'Register to save' banner. Tokens still expire in 7 days."""
     _ensure_bootstrap()
     user_id = "g_" + secrets.token_hex(8)
-    now = datetime.utcnow().isoformat()
+    now = utcnow().isoformat()
     u = {
         "user_id": user_id,
         "email": f"{user_id}@guest.local",
@@ -5392,7 +5370,7 @@ async def auth_forgot_password(req: ForgotPasswordReq, request: Request,
         return generic
 
     raw = secrets.token_urlsafe(32)
-    now = datetime.utcnow()
+    now = utcnow()
     # Any older link for this account stops working the moment a new one is issued.
     password_resets_col.delete_many({"user_id": user["user_id"]})
     password_resets_col.insert_one({
@@ -5418,7 +5396,7 @@ async def auth_reset_password(req: ResetPasswordReq) -> TokenOut:
     if not doc or doc.get("used_at"):
         raise HTTPException(400, "That reset link is no longer valid. Request a new one.")
     expires = doc.get("expires_at")
-    if not isinstance(expires, datetime) or expires < datetime.utcnow():
+    if not isinstance(expires, datetime) or expires < utcnow():
         raise HTTPException(400, "That reset link has expired. Request a new one.")
 
     # The account comes off the token document. Nothing the caller sent can
@@ -5430,7 +5408,7 @@ async def auth_reset_password(req: ResetPasswordReq) -> TokenOut:
 
     users_col.update_one({"user_id": uid}, {"$set": {
         "password_hash": _hash_pw(req.password),
-        "password_changed_at": datetime.utcnow().isoformat(),
+        "password_changed_at": utcnow().isoformat(),
     }})
     password_resets_col.delete_many({"user_id": uid})
     _invalidate_user_cache(uid)
@@ -5440,9 +5418,9 @@ async def auth_reset_password(req: ResetPasswordReq) -> TokenOut:
     log.info("auth.password_reset user=%s", uid)
     try:
         analytics_col.insert_one({"event": "password_reset", "user_id": uid,
-                                  "data": {}, "ts": datetime.utcnow().isoformat()})
+                                  "data": {}, "ts": utcnow().isoformat()})
     except Exception:
-        pass
+        log.debug("analytics.insert_failed event=password_reset", exc_info=True)
     return TokenOut(token=_make_token(uid), user=_public_user(user),
                     progress={"current_career": prog.get("current_career"),
                               "current_day": prog.get("current_day", 0)})
@@ -5474,12 +5452,12 @@ async def api_track(req: TrackReq):
             "simulation_id": sim_id(),
             "kind": req.kind,
             "ref": req.ref,
-            "ts": datetime.utcnow().isoformat(),
+            "ts": utcnow().isoformat(),
         })
         if req.kind in ("tool_switch", "email_open", "custom"):
             _touch_activity()
     except Exception:
-        pass
+        log.debug("activity.log_failed", exc_info=True)
     return {"status": "ok"}
 
 @app.get("/api/profile/fingerprint")
@@ -5615,16 +5593,16 @@ def _sync_progress(uid: str, career: str, day: int, completed_inc: int = 0) -> N
     try:
         progress_col.update_one({"user_id": uid}, q, upsert=True)
     except Exception:
-        pass
+        log.debug("progress.update_failed", exc_info=True)
 
 def _touch_activity() -> None:
     try:
         sessions_col.update_one(
             {"session_id": session_id()},
-            {"$set": {"last_activity_at": datetime.utcnow().isoformat()}},
+            {"$set": {"last_activity_at": utcnow().isoformat()}},
         )
     except Exception:
-        pass
+        log.debug("activity.touch_failed", exc_info=True)
 
 @app.post("/api/start")
 async def start_career(req: CareerReq, request: Request):
@@ -5701,15 +5679,15 @@ async def start_career(req: CareerReq, request: Request):
     set_orchestrator(create_orchestrator(req.career, req.experience_level))
     progress_col.update_one(
         {"user_id": user["user_id"]},
-        {"$set": {"current_career": req.career, "current_day": 1, "started_career_at": datetime.utcnow().isoformat()}},
+        {"$set": {"current_career": req.career, "current_day": 1, "started_career_at": utcnow().isoformat()}},
         upsert=True,
     )
     _invalidate_user_cache(user["user_id"])
     try: analytics_col.insert_one({"event": "simulation_started", "user_id": user["user_id"],
                                    "data": {"career": req.career, "level": req.experience_level,
                                             "source": "adaptive_engine" if used_engine else "hard_coded_seed"},
-                                   "ts": datetime.utcnow().isoformat()})
-    except Exception: pass
+                                   "ts": utcnow().isoformat()})
+    except Exception: log.debug("analytics.insert_failed event=simulation_started", exc_info=True)
     return {
         "status": "started", "career": req.career,
         "title": cfg["title"],
@@ -5734,7 +5712,7 @@ async def chat(req: ChatReq, request: Request, background: BackgroundTasks):
     career = get_career()
     sessions_col.update_one({"session_id": sid}, {"$inc": {"interaction_count": 1}})
     _touch_activity()
-    actions_col.insert_one({"simulation_id": sm, "action": req.message[:200], "ts": datetime.utcnow().isoformat()})
+    actions_col.insert_one({"simulation_id": sm, "action": req.message[:200], "ts": utcnow().isoformat()})
     # Tone classifier + escalation run async — they're observability, not on the hot reply path.
     # We pass the captured scope explicitly because BackgroundTasks runs in a fresh contextvars copy.
     def _observe_and_escalate(msg: str, sm_: str, sid_: str, career_: Optional[str], uid_: str):
@@ -5754,13 +5732,13 @@ async def chat(req: ChatReq, request: Request, background: BackgroundTasks):
             system_events_col.update_one({"id": ev["id"]}, {"$set": {"triggered": True}})
             cfg = CAREER_CONFIGS[career]
             eid = f"e_{uuid.uuid4().hex[:6]}"
-            emails_col.insert_one({"id": eid, "simulation_id": sm, "from_name": cfg["it"]["name"], "from_role": cfg["it"]["role"], "from_email": cfg["it"]["email"], "to": "all", "subject": f"⚠️ {ev['start_msg']}", "body": ev["start_msg"], "time": datetime.utcnow().strftime("%H:%M"), "read": False, "replied": False, "priority": "high", "category": "system", "requires_action": False})
+            emails_col.insert_one({"id": eid, "simulation_id": sm, "from_name": cfg["it"]["name"], "from_role": cfg["it"]["role"], "from_email": cfg["it"]["email"], "to": "all", "subject": f"⚠️ {ev['start_msg']}", "body": ev["start_msg"], "time": utcnow().strftime("%H:%M"), "read": False, "replied": False, "priority": "high", "category": "system", "requires_action": False})
             sessions_col.update_one({"session_id": sid}, {"$set": {"it_outage_active": True}})
         if ev.get("triggered") and not ev.get("resolved") and ev.get("end_at") and ic >= ev["end_at"]:
             system_events_col.update_one({"id": ev["id"]}, {"$set": {"resolved": True}})
             cfg = CAREER_CONFIGS[career]
             eid = f"e_{uuid.uuid4().hex[:6]}"
-            emails_col.insert_one({"id": eid, "simulation_id": sm, "from_name": cfg["it"]["name"], "from_role": cfg["it"]["role"], "from_email": cfg["it"]["email"], "to": "all", "subject": f"✅ {ev['end_msg']}", "body": ev["end_msg"], "time": datetime.utcnow().strftime("%H:%M"), "read": False, "replied": False, "priority": "low", "category": "system", "requires_action": False})
+            emails_col.insert_one({"id": eid, "simulation_id": sm, "from_name": cfg["it"]["name"], "from_role": cfg["it"]["role"], "from_email": cfg["it"]["email"], "to": "all", "subject": f"✅ {ev['end_msg']}", "body": ev["end_msg"], "time": utcnow().strftime("%H:%M"), "read": False, "replied": False, "priority": "low", "category": "system", "requires_action": False})
             sessions_col.update_one({"session_id": sid}, {"$set": {"it_outage_active": False}})
 
     history = get_chat_history()
@@ -5798,8 +5776,8 @@ async def chat(req: ChatReq, request: Request, background: BackgroundTasks):
     if cleaned != resp:
         log.info("chat.tool_json_unwrapped preview=%r", cleaned[:120])
     resp = cleaned
-    memory_col.insert_one({"session_id": sid, "role": "human", "content": req.message, "ts": datetime.utcnow().isoformat()})
-    memory_col.insert_one({"session_id": sid, "role": "ai", "content": resp, "ts": datetime.utcnow().isoformat()})
+    memory_col.insert_one({"session_id": sid, "role": "human", "content": req.message, "ts": utcnow().isoformat()})
+    memory_col.insert_one({"session_id": sid, "role": "ai", "content": resp, "ts": utcnow().isoformat()})
     history.append(("human", req.message))
     history.append(("ai", resp))
     # Trim chat_history to last 40 turns to keep token usage bounded over a long day
@@ -5813,7 +5791,7 @@ async def api_mark_read(email_id: str):
     sessions_col.update_one({"session_id": session_id()}, {"$addToSet": {"emails_read": email_id}})
     _touch_activity()
     actions_col.insert_one({"simulation_id": sim_id(), "kind": "email_open", "email_id": email_id,
-                            "ts": datetime.utcnow().isoformat()})
+                            "ts": utcnow().isoformat()})
     return {"status": "ok"}
 
 @app.get("/api/sent")
@@ -5856,12 +5834,12 @@ async def api_reply(req: ReplyReq):
         return {"error": "Email not found"}
     emails_col.update_one(
         {"id": req.email_id, "simulation_id": sim_id()},
-        {"$set": {"replied": True, "reply_text": req.text, "reply_time": datetime.utcnow().strftime("%H:%M")}},
+        {"$set": {"replied": True, "reply_text": req.text, "reply_time": utcnow().strftime("%H:%M")}},
     )
     sessions_col.update_one({"session_id": session_id()}, {"$addToSet": {"emails_replied": req.email_id}})
     actions_col.insert_one({"simulation_id": sim_id(), "kind": "email_reply", "email_id": req.email_id,
                             "action": f"reply:{req.email_id}:{req.text[:200]}",
-                            "ts": datetime.utcnow().isoformat()})
+                            "ts": utcnow().isoformat()})
     # Tone observer + escalations also apply to email replies
     observe_tone(req.text)
     check_escalations()
@@ -5890,7 +5868,7 @@ async def reset(request: Request):
 @app.get("/api/healthz", response_model=HealthOut)
 async def healthz() -> HealthOut:
     """Liveness check. Doesn't touch Mongo so it stays green during DB blips."""
-    return HealthOut(ok=True, ts=datetime.utcnow().isoformat(), version=APP_VERSION)
+    return HealthOut(ok=True, ts=utcnow().isoformat(), version=APP_VERSION)
 
 @app.get("/api/readyz")
 async def readyz():
@@ -5900,7 +5878,7 @@ async def readyz():
     except Exception as ex:
         log.warning("readyz.mongo_unreachable kind=%s", type(ex).__name__)
         return _err("not_ready", "Database not reachable", status=503)
-    return {"ok": True, "ts": datetime.utcnow().isoformat(), "version": APP_VERSION}
+    return {"ok": True, "ts": utcnow().isoformat(), "version": APP_VERSION}
 
 @app.get("/api/health")
 async def health():
@@ -5913,7 +5891,7 @@ async def health():
         db_status = "unreachable"
     return {"status": "ok" if db_status == "connected" else "degraded",
             "db": db_status, "version": APP_VERSION,
-            "ts": datetime.utcnow().isoformat()}
+            "ts": utcnow().isoformat()}
 
 @app.get("/api/careers")
 async def list_careers():
@@ -5955,7 +5933,7 @@ async def api_complete_task(task_id: str):
         return _err(blocked[0], blocked[1], status=400)
     r = tasks_col.update_one(
         {"id": task_id, "simulation_id": sim_id(), "review_status": {"$ne": "approved"}},
-        {"$set": {"status": "done", "review_status": "pending_review", "completed_at": datetime.utcnow().isoformat()}},
+        {"$set": {"status": "done", "review_status": "pending_review", "completed_at": utcnow().isoformat()}},
     )
     if r.modified_count == 0:
         return {"error": "not_found_or_already_approved"}
@@ -5983,7 +5961,7 @@ async def api_hr_onboarding_submit(req: HrOnboardingReq):
         return _err("right_to_work_required", "You must confirm right to work before submitting.")
     if len(req.sort_code) < 6 or len(req.account_number) < 8:
         return _err("invalid_bank_details", "Enter a 6-digit sort code and 8-digit account number (simulation data is fine).")
-    now = datetime.utcnow().isoformat()
+    now = utcnow().isoformat()
     uid = user_id() or ""
     rec = {
         "simulation_id": sim_id(),
@@ -6029,7 +6007,7 @@ async def api_hr_onboarding_submit(req: HrOnboardingReq):
     try:
         _post_slack_system("#general", "You", "Submitted my new-starter HR forms via the portal.")
     except Exception:
-        pass
+        log.debug("slack.system_post_failed", exc_info=True)
     return {"ok": True, "submitted": True, "replied_email_ids": replied_ids}
 
 
@@ -6073,7 +6051,7 @@ async def api_checklist_submit(kind: str, req: ChecklistSubmitReq):
     got = {x for x in (req.completed_ids or []) if x in required}
     if got != required:
         return _err("incomplete", "Mark every required item complete.")
-    now = datetime.utcnow().isoformat()
+    now = utcnow().isoformat()
     rec = {
         "simulation_id": sim_id(),
         "user_id": user_id() or "",
@@ -6087,7 +6065,7 @@ async def api_checklist_submit(kind: str, req: ChecklistSubmitReq):
     try:
         _post_slack_system("#general", "You", f"Submitted my {label}.")
     except Exception:
-        pass
+        log.debug("slack.system_post_failed", exc_info=True)
     return {"ok": True, "submitted": True}
 
 
@@ -6108,7 +6086,7 @@ async def api_files_save(req: FilesSaveReq):
         "user_id": user_id() or "",
         "folder": req.folder.strip(),
         "filename": req.filename.strip(),
-        "saved_at": datetime.utcnow().isoformat(),
+        "saved_at": utcnow().isoformat(),
         "saved": True,
     }
     files_col.insert_one(dict(rec))
@@ -6116,7 +6094,7 @@ async def api_files_save(req: FilesSaveReq):
     try:
         _post_slack_system("#general", "You", f"Saved {req.filename} to {req.folder}.")
     except Exception:
-        pass
+        log.debug("slack.system_post_failed", exc_info=True)
     return {"ok": True, "save": rec}
 
 
@@ -6269,10 +6247,10 @@ async def api_next_day():
     sessions_col.update_one(
         {"session_id": session_id()},
         {"$set": {"current_day": nxt,
-                  "real_start_time": datetime.utcnow().isoformat(),
+                  "real_start_time": utcnow().isoformat(),
                   "auto_ended": False,
-                  "last_activity_at": datetime.utcnow().isoformat(),
-                  "last_clock_tick": datetime.utcnow().isoformat(),
+                  "last_activity_at": utcnow().isoformat(),
+                  "last_clock_tick": utcnow().isoformat(),
                   "clock_paused_sec": 0}},
     )
     _sync_progress(user_id() or "", career or "", nxt, completed_inc=1)
@@ -6302,7 +6280,7 @@ async def api_next_day():
         "to": "you",
         "subject": f"Day {nxt} priorities — re: yesterday",
         "body": body,
-        "time": datetime.utcnow().strftime("%H:%M"),
+        "time": utcnow().strftime("%H:%M"),
         "read": False, "replied": False,
         "priority": "high" if score < 50 else "medium",
         "category": "manager_review",
@@ -6342,7 +6320,7 @@ async def api_siem_triage(alert_id: str, body: SiemTriageReq):
     if not alert:
         raise HTTPException(404, "Alert not found")
     action = body.action
-    now_iso = datetime.utcnow().isoformat() + "Z"
+    now_iso = utcnow().isoformat() + "Z"
 
     # ── Take Ownership: stamp owned_at, keep the alert open for a final verdict ──
     if action == "investigate":
@@ -6370,9 +6348,9 @@ async def api_siem_triage(alert_id: str, body: SiemTriageReq):
         else:
             try:
                 owned = datetime.fromisoformat(str(alert["owned_at"]).replace("Z", ""))
-                upd["mttr_sec"] = max(0, int((datetime.utcnow() - owned).total_seconds()))
+                upd["mttr_sec"] = max(0, int((utcnow() - owned).total_seconds()))
             except Exception:
-                pass
+                log.debug("alert.mttr_compute_failed", exc_info=True)
         siem_col.update_one({"id": alert_id, "simulation_id": sim_id()}, {"$set": upd})
     if body.note:
         siem_col.update_one(
@@ -6545,7 +6523,7 @@ async def api_siem_contain(alert_id: str):
         raise HTTPException(400, detail={"error": "no_telemetry",
             "message": "This alert has no endpoint telemetry — nothing to isolate."})
     already_contained = (alert.get("edr_telemetry") or {}).get("host_status") == "contained"
-    now_iso = datetime.utcnow().isoformat() + "Z"
+    now_iso = utcnow().isoformat() + "Z"
     siem_col.update_one(
         {"id": alert_id, "simulation_id": sim_id()},
         {"$set": {"edr_telemetry.host_status": "contained",
@@ -6720,7 +6698,7 @@ def _grc_score(control_id: str, ev_id: str, verdict: str, reason, correct: bool,
     evals_col.insert_one({
         "simulation_id": sim_id(), "type": "grc_verdict", "source": "grc_verdict",
         "control_id": control_id, "ev_id": ev_id, "verdict": verdict, "reason": reason,
-        "correct": correct, "points": pts, "ts": datetime.utcnow().isoformat()})
+        "correct": correct, "points": pts, "ts": utcnow().isoformat()})
     if pts:
         sessions_col.update_one({"session_id": session_id()}, {"$inc": {"score_adj": pts}})
 
@@ -6859,7 +6837,7 @@ def _grc_score_chase(pbc_id: str, action: str, correct: bool, pts: int):
     evals_col.insert_one({
         "simulation_id": sim_id(), "type": "grc_chase", "source": "grc_chase",
         "pbc_id": pbc_id, "action": action, "correct": correct, "points": pts,
-        "ts": datetime.utcnow().isoformat()})
+        "ts": utcnow().isoformat()})
     if pts:
         sessions_col.update_one({"session_id": session_id()}, {"$inc": {"score_adj": pts}})
 
@@ -6887,7 +6865,7 @@ def _flag_mistake(category: str, summary: str, detail: str, points: int = -10):
     sessions_col.update_one(
         {"session_id": session_id()},
         {"$inc": {"mistakes_count": 1, "score_adj": points},
-         "$push": {"mistakes": {"category": category, "summary": summary, "ts": datetime.utcnow().isoformat()}}},
+         "$push": {"mistakes": {"category": category, "summary": summary, "ts": utcnow().isoformat()}}},
     )
 
 def _ack_correct(category: str, summary: str, detail: str, points: int = 15):
@@ -6976,7 +6954,7 @@ async def api_jira_update(ticket_id: str, req: JiraUpdateReq):
     if req.comment:
         jira_col.update_one(
             {"id": ticket_id, "simulation_id": sim_id()},
-            {"$push": {"comments": {"author": "you", "text": req.comment, "ts": datetime.utcnow().isoformat()}}},
+            {"$push": {"comments": {"author": "you", "text": req.comment, "ts": utcnow().isoformat()}}},
         )
 
     if update_set:
@@ -7032,11 +7010,10 @@ async def api_campaign_update(campaign_id: str, req: CampaignUpdateReq):
     if req.brand_colour: update_set["brand_colour"] = req.brand_colour
     if req.tone: update_set["tone"] = req.tone
     if req.status: update_set["status"] = req.status
-    update_set["last_updated"] = datetime.utcnow().strftime("%H:%M")
+    update_set["last_updated"] = utcnow().strftime("%H:%M")
     campaigns_col.update_one({"id": campaign_id, "simulation_id": sim_id()}, {"$set": update_set})
 
     flagged = False
-    cfg = CAREER_CONFIGS["marketing"]
 
     # Brand colour validation — must be the new teal #0D9488 (case-insensitive)
     if req.brand_colour:
@@ -7071,7 +7048,7 @@ async def api_campaign_update(campaign_id: str, req: CampaignUpdateReq):
         tone_ok = any(w in req.tone.lower() for w in ("bold", "innovative", "edgy", "punchy"))
         if bc_ok and tone_ok and len(req.content.strip()) > 20:
             _ack_correct("campaign", f"Campaign {campaign_id} update",
-                f"Nice — colour and tone are on-brief, copy reads well. Keep this consistent across all three platform variants.",
+                "Nice — colour and tone are on-brief, copy reads well. Keep this consistent across all three platform variants.",
                 points=20)
             emit("campaign_updated", {"campaign_id": campaign_id})
 
@@ -7089,7 +7066,7 @@ async def api_invoice_resolve(invoice_id: str, req: InvoiceResolveReq):
     invoices_col.update_one(
         {"id": invoice_id, "simulation_id": sim_id()},
         {"$set": {"status": "resolved", "resolved_amount": req.resolved_amount, "resolution_note": req.note,
-                  "resolved_at": datetime.utcnow().strftime("%H:%M")}},
+                  "resolved_at": utcnow().strftime("%H:%M")}},
     )
 
     correct = inv.get("correct_amount")
@@ -7177,13 +7154,13 @@ def _sim_clock(session: dict) -> dict:
     rs_iso = (session or {}).get("real_start_time")
     if not rs_iso:
         # Pre-timer sessions: synthesize a start so the clock still works.
-        rs_iso = (session or {}).get("started_at") or datetime.utcnow().isoformat()
+        rs_iso = (session or {}).get("started_at") or utcnow().isoformat()
     try:
         rs = datetime.fromisoformat(rs_iso)
     except Exception:
-        rs = datetime.utcnow()
+        rs = utcnow()
     paused = float((session or {}).get("clock_paused_sec") or 0)
-    elapsed = max(0.0, (datetime.utcnow() - rs).total_seconds() - paused)
+    elapsed = max(0.0, (utcnow() - rs).total_seconds() - paused)
     day_sec = _real_day_sec(session)
     remaining = max(0.0, day_sec - elapsed)
     sim_elapsed = min(_SIM_DAY_SEC, (elapsed / day_sec) * _SIM_DAY_SEC)
@@ -7207,12 +7184,12 @@ async def api_sim_clock():
     """Lightweight clock-poll endpoint. Marks auto_ended=True on the session
     when 2 real hours have elapsed so the frontend can trigger end-of-day."""
     s = sessions_col.find_one({"session_id": session_id()}) or {}
-    now = datetime.utcnow()
+    now = utcnow()
     pause_fields = _tick_idle_pause(s, now)
     try:
         sessions_col.update_one({"session_id": session_id()}, {"$set": pause_fields})
     except Exception:
-        pass
+        log.debug("session.pause_update_failed", exc_info=True)
     s = {**s, **pause_fields}
     clock = _sim_clock(s)
     if clock["ended"] and not clock["auto_ended"]:
@@ -7504,7 +7481,7 @@ def _sync_meetings(sess: dict, clock: dict) -> list[dict]:
             sessions_col.update_one(
                 {"session_id": session_id()},
                 {"$set": {f"meetings.{m['id']}.state": rt["state"],
-                          f"meetings.{m['id']}.updated_at": datetime.utcnow().isoformat()}},
+                          f"meetings.{m['id']}.updated_at": utcnow().isoformat()}},
             )
             if rt["state"] == "missed" and not stored.get("submitted_at"):
                 _meeting_missed(sess, m)
@@ -7534,7 +7511,7 @@ def _meeting_missed(sess: dict, m: dict) -> None:
                  "what's covered and what isn't. If you're heads-down in something, say so "
                  "beforehand and I'll take it async.\n\n"
                  "Send me your summary by reply now, please.\n\n" + mgr["name"])),
-            "time": datetime.utcnow().strftime("%H:%M"), "read": False, "replied": False,
+            "time": utcnow().strftime("%H:%M"), "read": False, "replied": False,
             "priority": "medium" if day1 else "high", "category": "manager_review", "requires_action": True,
             "day": int(sess.get("current_day") or 1), "injected": True,
         })
@@ -7674,7 +7651,7 @@ async def api_meeting_scene(meeting_id: str):
     if rt["state"] == "open" and not rec.get("joined_at"):
         sessions_col.update_one(
             {"session_id": session_id()},
-            {"$set": {f"meetings.{meeting_id}.joined_at": datetime.utcnow().isoformat()}})
+            {"$set": {f"meetings.{meeting_id}.joined_at": utcnow().isoformat()}})
     cfg = CAREER_CONFIGS.get(career or "cybersecurity", CAREER_CONFIGS["cybersecurity"])
     names = {
         "manager": cfg["manager"], "teammate": cfg["teammate"],
@@ -7736,7 +7713,7 @@ async def api_meeting_submit(meeting_id: str, body: MeetingSubmitReq):
     sessions_col.update_one(
         {"session_id": session_id()},
         {"$set": {f"meetings.{meeting_id}.state": "attended",
-                  f"meetings.{meeting_id}.submitted_at": datetime.utcnow().isoformat(),
+                  f"meetings.{meeting_id}.submitted_at": utcnow().isoformat(),
                   f"meetings.{meeting_id}.summary": body.summary,
                   f"meetings.{meeting_id}.accuracy": reaction["accuracy"],
                   f"meetings.{meeting_id}.quality": quality,
@@ -7756,6 +7733,12 @@ async def api_meeting_submit(meeting_id: str, body: MeetingSubmitReq):
 # Plain-English explanations of column headers, returned to the frontend
 # when session.experience_level == "beginner". Same UI for all users —
 # the front-end only renders the ? icons in beginner mode.
+#
+# Careers share tool types but not column vocabularies: a kanban IN_REVIEW
+# means "a teammate is reviewing your code" to a developer and "data/design
+# sign-off is the gate" to a PM. Shared columns live here; anything whose
+# meaning is career-specific lives in _CAREER_TOOL_TOOLTIPS and is merged on
+# top per request.
 _TOOL_TOOLTIPS: dict[str, dict[str, str]] = {
     "alerts": {
         "SEV": "Severity — CRITICAL: respond within 1 hour. HIGH: 2 hours. MEDIUM: 4 hours. LOW: 8 hours.",
@@ -7772,51 +7755,8 @@ _TOOL_TOOLTIPS: dict[str, dict[str, str]] = {
         "DONE": "Closed tickets. Read the resolution and learn from teammates' approaches.",
         "PRIORITY": "Critical / High / Medium / Low — drives what you should pick up first.",
         "ASSIGNEE": "Who's responsible. 'you' means it's your ticket.",
-        # Procurement PO kanban columns:
-        "DRAFT": "PO has been created but not yet sent for review. Verify amounts, requester, and cost centre before moving it on.",
-        "PENDING_APPROVAL": "Security review and DPA are clear — waiting on CFO/Director sign-off. Push with a one-line summary.",
-        "APPROVED": "Signed off but not yet issued. Issue the PO via NetSuite and file with AP.",
-        "ESCALATION": "Stuck — vendor risk, sanctions, or scope issues need Legal/DPO/CFO. Never approve unilaterally.",
-        "REJECTED": "Closed without approval. Read the reason — it usually means duplicate tool, missing security review, or wrong approver.",
-        "AMOUNT": "Total commit in GBP. Approval thresholds: <£10k team lead, <£50k Head of Procurement, >£50k CFO.",
-        "VENDOR": "Who you're paying. Always cross-check the Vendor Catalog — half of new requests duplicate something you already pay for.",
-        "RISK_FLAGS": "Auto-flagged issues — backdating, no DPA, missing SOC 2, sanctions concern. Every flag must be resolved before approval.",
-        "TERM": "Annual / multi-year / prepaid. Multi-year locks you in — only useful if price is materially better.",
-        # L&D Training Programs kanban columns:
-        "PROPOSED": "Someone has asked for this programme but it isn't designed or scheduled. Decide: design it / route to existing programme / put on hold.",
-        "DESIGNING": "Curriculum being built. Lock SME interviews, learning objectives, and assessment before moving on.",
-        "SCHEDULED": "Curriculum signed off, dates set, facilitator confirmed. Just needs pre-work + enrolment.",
-        "IN_SESSION": "Programme is running. Monitor day-by-day feedback. Don't wait for the end to find out it's broken.",
-        "COMPLETED": "Closed. Archive the deck, capture NPS, file the post-mortem.",
-        "ON_HOLD": "Parked — overlapping content, missing budget, or no capacity. Note WHY in the card so you can defend the decision.",
-        "PROGRAM_TYPE": "onboarding / compliance / leadership / wellbeing / technical / upskilling. Compliance is non-negotiable and audit-tracked.",
-        "OWNER": "Who runs this programme day-to-day. 'you' means you've inherited it.",
-        "LEARNERS": "Number of enrolled (or requested) learners. Use this to spot programmes too small to justify standing up.",
-        "BUDGET_GBP": "Programme cost in GBP — facilitator + content + LMS fees. Compare with cost-per-head before approving.",
-        # PM Roadmap kanban columns / fields:
-        "BACKLOG": "Ideas with rough evidence but no committed dates. Don't promise these to Sales — that's how roadmaps lose credibility.",
-        "DISCOVERY": "Pre-build research: user interviews, instrumentation, problem-framing. Should produce a shaped problem doc before moving on.",
-        "IN_BUILD": "Eng is actively coding. PM job here: unblock, hold scope, don't add new requirements mid-sprint.",
-        "IN_REVIEW": "Build is done; data, design, or stakeholder review is the gate. Common failure: shipping past a stalled review just to ship.",
-        "LAUNCHED": "Live to users. Watch the metrics for 2-4 weeks. If instrumentation is broken or impact reverses, MOVE BACK or PARK — don't leave it in 'launched'.",
-        "PARKED": "Deliberately set aside. Always note WHY (no evidence / overlaps / wrong scope / waiting on dependency). Park with rationale beats kill silently.",
-        "AREA": "Which part of the product/funnel this affects (activation / acquisition / monetization / pricing / compliance). Helps spot over-investment in one area.",
-        "IMPACT": "Estimated business impact (low/medium/high) BEFORE we ship. Compare with actual post-launch — it's how you calibrate over time.",
-        "EFFORT_WEEKS": "Eng effort estimate. Combined with impact gives you the cost/value lens for prioritisation.",
-        "SQUAD": "Which squad delivers it. If it's not your squad's scope, route it — don't put it on your roadmap to be helpful.",
-        # GRC Risk Register kanban columns / fields:
-        "IDENTIFIED": "Risk logged but not yet analysed. A critical risk should never sit here unassigned — give it an owner and move it to assessing/treating.",
-        "ASSESSING": "Scoring likelihood × impact and gathering context. Expired vendor reviews and un-scoped risks belong here, not in monitoring.",
-        "TREATING": "A remediation or mitigation plan is being executed, with an owner and a deadline. Most live risks should be here.",
-        "MONITORING": "Treated down to acceptable residual, now watched for change. Only put things here that genuinely have a working control — not open questions.",
-        "ACCEPTED": "The org has formally chosen to live with this risk — but ONLY valid with a documented sign-off from the accountable owner. No sign-off = it does not belong in accepted.",
-        "CLOSED": "Treatment verified and the risk is gone. If a 'closed' risk recurs, REOPEN it — don't leave it closed because a matching historical entry exists.",
-        "LIKELIHOOD": "How probable the risk is (low/medium/high). Combined with impact gives the risk score.",
-        "IMPACT": "Severity if it happens. A PHI/BAA gap is 'critical' regardless of likelihood — regulatory exposure dominates.",
-        "RESIDUAL": "The risk level AFTER controls. This is what goes to the risk committee — inherent minus the effect of treatment.",
-        "FRAMEWORK": "Which standard this maps to (SOC 2 / HIPAA / ISO 27001). Tells you whether the auditor will test it directly.",
     },
-    "table": {  # Sage spreadsheet + Vendor catalog
+    "table": {  # Sage spreadsheet
         "DATE": "When the transaction happened. Match against the bank statement to find missing or mis-dated entries.",
         "DESC": "Plain-English description of the transaction.",
         "DR": "Debit — money coming INTO the account (or expense going out). Always positive.",
@@ -7824,39 +7764,6 @@ _TOOL_TOOLTIPS: dict[str, dict[str, str]] = {
         "BAL": "Running balance after this entry. Should match the bank statement at every step.",
         "REF": "Reference / supporting doc — invoice number, journal ID, etc. Helps you trace evidence.",
         "ACC": "GL account code (e.g. 1100 Bank, 5005 Cost of Sales). Wrong code = wrong P&L category.",
-        # Procurement Vendor Catalog columns:
-        "VENDOR_ID": "Internal vendor identifier — use this when raising POs or escalations.",
-        "CATEGORY": "What the vendor supplies (Observability, AppSec, HR tech, AI/LLM, etc.). Use it to spot duplicates.",
-        "STATUS": "active = under contract. renewal_due = contract ends within 90 days. prospect = not yet signed.",
-        "CONTRACT_END": "When this contract expires. Start renewal conversations 90 days out.",
-        "ARR_GBP": "Annual recurring cost in GBP. Sum these by category for your spend review.",
-        "SECURITY_REVIEW": "NOT_STARTED / IN_PROGRESS / PASSED. No production data flows until PASSED.",
-        "SOC2": "current = SOC 2 Type II in force. expired/missing = block until renewed.",
-        "DPA": "Data Processing Agreement. signed / draft / missing. Required wherever vendor touches user data.",
-        "OWNER": "Internal owner who manages the relationship. 'you' means you've inherited it.",
-        # PM Feature Requests table columns:
-        "REQ_ID": "Internal request ID. Use this when replying to requesters so the trail is searchable.",
-        "SOURCE": "Where the ask came from (Sales / Customer Success / Product / etc.). Sales-sourced asks are often single-customer-flavoured — verify before promoting.",
-        "REQUESTER": "Who raised it. One repeat-requester pushing 'must have' on three vague asks ≠ three roadmap candidates.",
-        "CUSTOMERS_AFFECTED": "How many real customers asked. 0 or 1 = not a roadmap item without strong other evidence.",
-        "ARR_IMPACT_GBP": "ARR exposure tied to the request. Be careful: 'might unblock a deal' isn't the same as 'will sign once this ships'.",
-        "DUPE_OF": "Pointer to another request when this is a duplicate. Always reply to the requester linking the original — don't just close.",
-        # L&D Learner Pipeline table columns:
-        "LEARNER_ID": "Internal learner identifier. Use this on LMS exports and manager escalations.",
-        "NAME": "Learner's name. Don't address learners with threatening reminders — escalate to their manager instead.",
-        "DEPT": "Department. Compliance completion patterns are dept-level — look for whole teams stalled, not individuals.",
-        "PROGRAM": "Which programme this learner is enrolled in. Cross-reference with the Training Programs board.",
-        "ENROLLED_DATE": "When the learner was added to the programme. If due_date is close and completion% is low, that's a manager problem.",
-        "DUE_DATE": "Hard deadline (compliance) or soft target (upskilling). For compliance, missed = audit finding.",
-        "COMPLETION_PCT": "% of modules finished. <30% near due date = needs a manager nudge. 0% across a whole team = the manager themselves haven't done it.",
-        "MANAGER": "The learner's line manager. THIS is who you escalate to — never the learner directly.",
-        # GRC Control Library table columns:
-        "CONTROL_ID": "The control's reference (e.g. CC6.1, 164.308, A.9.2). Use it when replying to the auditor's PBC list.",
-        "FRAMEWORK": "Which standard the control belongs to (SOC 2 / HIPAA / ISO 27001). A control can map to more than one — evidence usually satisfies all of them.",
-        "STATUS": "implemented (current in-period evidence exists) / partial (works but evidence is incomplete or a gap remains) / needs_evidence / not_implemented. NEVER mark 'implemented' without evidence — the auditor samples and one bad line discredits the rest.",
-        "LAST_TESTED": "When the control was last verified. Evidence outside the audit period doesn't count — a control tested 14 months ago is effectively untested for this audit.",
-        "EVIDENCE": "The artefact proving the control operates (config export, ticket sample, review record). 'none' or 'stale' means the status can't honestly be 'implemented'.",
-        "OWNER": "Who is accountable for the control. An owner who has left the company = an orphaned control with no one accountable; reassign before fieldwork.",
     },
     "campaigns": {
         "STATUS": "draft → scheduled → live → completed/paused. Only 'approved' campaigns can go live.",
@@ -7886,13 +7793,120 @@ _TOOL_TOOLTIPS: dict[str, dict[str, str]] = {
     },
 }
 
+# Career-specific column vocabularies, layered over _TOOL_TOOLTIPS. Keys that
+# also exist in the shared set (IN_REVIEW, IMPACT, STATUS, OWNER, …) win for
+# that career only.
+_CAREER_TOOL_TOOLTIPS: dict[str, dict[str, dict[str, str]]] = {
+    "procurement": {
+        "kanban": {  # Purchase Order board
+            "DRAFT": "PO has been created but not yet sent for review. Verify amounts, requester, and cost centre before moving it on.",
+            "PENDING_APPROVAL": "Security review and DPA are clear — waiting on CFO/Director sign-off. Push with a one-line summary.",
+            "APPROVED": "Signed off but not yet issued. Issue the PO via NetSuite and file with AP.",
+            "ESCALATION": "Stuck — vendor risk, sanctions, or scope issues need Legal/DPO/CFO. Never approve unilaterally.",
+            "REJECTED": "Closed without approval. Read the reason — it usually means duplicate tool, missing security review, or wrong approver.",
+            "AMOUNT": "Total commit in GBP. Approval thresholds: <£10k team lead, <£50k Head of Procurement, >£50k CFO.",
+            "VENDOR": "Who you're paying. Always cross-check the Vendor Catalog — half of new requests duplicate something you already pay for.",
+            "RISK_FLAGS": "Auto-flagged issues — backdating, no DPA, missing SOC 2, sanctions concern. Every flag must be resolved before approval.",
+            "TERM": "Annual / multi-year / prepaid. Multi-year locks you in — only useful if price is materially better.",
+        },
+        "table": {  # Vendor Catalog
+            "VENDOR_ID": "Internal vendor identifier — use this when raising POs or escalations.",
+            "CATEGORY": "What the vendor supplies (Observability, AppSec, HR tech, AI/LLM, etc.). Use it to spot duplicates.",
+            "STATUS": "active = under contract. renewal_due = contract ends within 90 days. prospect = not yet signed.",
+            "CONTRACT_END": "When this contract expires. Start renewal conversations 90 days out.",
+            "ARR_GBP": "Annual recurring cost in GBP. Sum these by category for your spend review.",
+            "SECURITY_REVIEW": "NOT_STARTED / IN_PROGRESS / PASSED. No production data flows until PASSED.",
+            "SOC2": "current = SOC 2 Type II in force. expired/missing = block until renewed.",
+            "DPA": "Data Processing Agreement. signed / draft / missing. Required wherever vendor touches user data.",
+            "OWNER": "Internal owner who manages the relationship. 'you' means you've inherited it.",
+        },
+    },
+    "hr": {
+        "kanban": {  # L&D Training Programs
+            "PROPOSED": "Someone has asked for this programme but it isn't designed or scheduled. Decide: design it / route to existing programme / put on hold.",
+            "DESIGNING": "Curriculum being built. Lock SME interviews, learning objectives, and assessment before moving on.",
+            "SCHEDULED": "Curriculum signed off, dates set, facilitator confirmed. Just needs pre-work + enrolment.",
+            "IN_SESSION": "Programme is running. Monitor day-by-day feedback. Don't wait for the end to find out it's broken.",
+            "COMPLETED": "Closed. Archive the deck, capture NPS, file the post-mortem.",
+            "ON_HOLD": "Parked — overlapping content, missing budget, or no capacity. Note WHY in the card so you can defend the decision.",
+            "PROGRAM_TYPE": "onboarding / compliance / leadership / wellbeing / technical / upskilling. Compliance is non-negotiable and audit-tracked.",
+            "OWNER": "Who runs this programme day-to-day. 'you' means you've inherited it.",
+            "LEARNERS": "Number of enrolled (or requested) learners. Use this to spot programmes too small to justify standing up.",
+            "BUDGET_GBP": "Programme cost in GBP — facilitator + content + LMS fees. Compare with cost-per-head before approving.",
+        },
+        "table": {  # Learner Pipeline
+            "LEARNER_ID": "Internal learner identifier. Use this on LMS exports and manager escalations.",
+            "NAME": "Learner's name. Don't address learners with threatening reminders — escalate to their manager instead.",
+            "DEPT": "Department. Compliance completion patterns are dept-level — look for whole teams stalled, not individuals.",
+            "PROGRAM": "Which programme this learner is enrolled in. Cross-reference with the Training Programs board.",
+            "ENROLLED_DATE": "When the learner was added to the programme. If due_date is close and completion% is low, that's a manager problem.",
+            "DUE_DATE": "Hard deadline (compliance) or soft target (upskilling). For compliance, missed = audit finding.",
+            "COMPLETION_PCT": "% of modules finished. <30% near due date = needs a manager nudge. 0% across a whole team = the manager themselves haven't done it.",
+            "MANAGER": "The learner's line manager. THIS is who you escalate to — never the learner directly.",
+        },
+    },
+    "pm": {
+        "kanban": {  # Roadmap
+            "BACKLOG": "Ideas with rough evidence but no committed dates. Don't promise these to Sales — that's how roadmaps lose credibility.",
+            "DISCOVERY": "Pre-build research: user interviews, instrumentation, problem-framing. Should produce a shaped problem doc before moving on.",
+            "IN_BUILD": "Eng is actively coding. PM job here: unblock, hold scope, don't add new requirements mid-sprint.",
+            "IN_REVIEW": "Build is done; data, design, or stakeholder review is the gate. Common failure: shipping past a stalled review just to ship.",
+            "LAUNCHED": "Live to users. Watch the metrics for 2-4 weeks. If instrumentation is broken or impact reverses, MOVE BACK or PARK — don't leave it in 'launched'.",
+            "PARKED": "Deliberately set aside. Always note WHY (no evidence / overlaps / wrong scope / waiting on dependency). Park with rationale beats kill silently.",
+            "AREA": "Which part of the product/funnel this affects (activation / acquisition / monetization / pricing / compliance). Helps spot over-investment in one area.",
+            "IMPACT": "Estimated business impact (low/medium/high) BEFORE we ship. Compare with actual post-launch — it's how you calibrate over time.",
+            "EFFORT_WEEKS": "Eng effort estimate. Combined with impact gives you the cost/value lens for prioritisation.",
+            "SQUAD": "Which squad delivers it. If it's not your squad's scope, route it — don't put it on your roadmap to be helpful.",
+        },
+        "table": {  # Feature Requests
+            "REQ_ID": "Internal request ID. Use this when replying to requesters so the trail is searchable.",
+            "SOURCE": "Where the ask came from (Sales / Customer Success / Product / etc.). Sales-sourced asks are often single-customer-flavoured — verify before promoting.",
+            "REQUESTER": "Who raised it. One repeat-requester pushing 'must have' on three vague asks ≠ three roadmap candidates.",
+            "CUSTOMERS_AFFECTED": "How many real customers asked. 0 or 1 = not a roadmap item without strong other evidence.",
+            "ARR_IMPACT_GBP": "ARR exposure tied to the request. Be careful: 'might unblock a deal' isn't the same as 'will sign once this ships'.",
+            "DUPE_OF": "Pointer to another request when this is a duplicate. Always reply to the requester linking the original — don't just close.",
+        },
+    },
+    "grc": {
+        "kanban": {  # Risk Register
+            "IDENTIFIED": "Risk logged but not yet analysed. A critical risk should never sit here unassigned — give it an owner and move it to assessing/treating.",
+            "ASSESSING": "Scoring likelihood × impact and gathering context. Expired vendor reviews and un-scoped risks belong here, not in monitoring.",
+            "TREATING": "A remediation or mitigation plan is being executed, with an owner and a deadline. Most live risks should be here.",
+            "MONITORING": "Treated down to acceptable residual, now watched for change. Only put things here that genuinely have a working control — not open questions.",
+            "ACCEPTED": "The org has formally chosen to live with this risk — but ONLY valid with a documented sign-off from the accountable owner. No sign-off = it does not belong in accepted.",
+            "CLOSED": "Treatment verified and the risk is gone. If a 'closed' risk recurs, REOPEN it — don't leave it closed because a matching historical entry exists.",
+            "LIKELIHOOD": "How probable the risk is (low/medium/high). Combined with impact gives the risk score.",
+            "IMPACT": "Severity if it happens. A PHI/BAA gap is 'critical' regardless of likelihood — regulatory exposure dominates.",
+            "RESIDUAL": "The risk level AFTER controls. This is what goes to the risk committee — inherent minus the effect of treatment.",
+            "FRAMEWORK": "Which standard this maps to (SOC 2 / HIPAA / ISO 27001). Tells you whether the auditor will test it directly.",
+        },
+        "table": {  # Control Library
+            "CONTROL_ID": "The control's reference (e.g. CC6.1, 164.308, A.9.2). Use it when replying to the auditor's PBC list.",
+            "FRAMEWORK": "Which standard the control belongs to (SOC 2 / HIPAA / ISO 27001). A control can map to more than one — evidence usually satisfies all of them.",
+            "STATUS": "implemented (current in-period evidence exists) / partial (works but evidence is incomplete or a gap remains) / needs_evidence / not_implemented. NEVER mark 'implemented' without evidence — the auditor samples and one bad line discredits the rest.",
+            "LAST_TESTED": "When the control was last verified. Evidence outside the audit period doesn't count — a control tested 14 months ago is effectively untested for this audit.",
+            "EVIDENCE": "The artefact proving the control operates (config export, ticket sample, review record). 'none' or 'stale' means the status can't honestly be 'implemented'.",
+            "OWNER": "Who is accountable for the control. An owner who has left the company = an orphaned control with no one accountable; reassign before fieldwork.",
+        },
+    },
+}
+
+def _tooltips_for(tool_type: str, career: str) -> dict[str, str]:
+    merged = dict(_TOOL_TOOLTIPS.get(tool_type, {}))
+    merged.update(_CAREER_TOOL_TOOLTIPS.get(career, {}).get(tool_type, {}))
+    return merged
+
 @app.get("/api/tooltips")
-async def api_tooltips(tool_type: str = ""):
-    """Return per-tool-type column tooltips. The frontend renders these
-    only when session.experience_level == 'beginner'."""
+async def api_tooltips(tool_type: str = "", career: str = ""):
+    """Return per-tool-type column tooltips, specialised for the career when
+    one is given. The frontend renders these only when
+    session.experience_level == 'beginner'."""
     if tool_type:
-        return {"tool_type": tool_type, "tooltips": _TOOL_TOOLTIPS.get(tool_type, {})}
-    return {"tooltips_by_type": _TOOL_TOOLTIPS}
+        return {"tool_type": tool_type, "career": career,
+                "tooltips": _tooltips_for(tool_type, career)}
+    types = set(_TOOL_TOOLTIPS) | set(_CAREER_TOOL_TOOLTIPS.get(career, {}))
+    return {"career": career,
+            "tooltips_by_type": {t: _tooltips_for(t, career) for t in sorted(types)}}
 
 # ── BEGINNER STUDY GUIDE ─────────────────────────────────────────
 # Reference primer surfaced only in beginner (easy) mode. Teaches the role
@@ -8338,7 +8352,7 @@ def track(event: str, user_id_val: Optional[str] = None, data: Optional[dict] = 
             "event": event,
             "user_id": user_id_val or user_id(),
             "data": data or {},
-            "ts": datetime.utcnow().isoformat(),
+            "ts": utcnow().isoformat(),
         })
     except Exception as ex:
         log.warning("analytics.track_failed event=%s kind=%s", event, type(ex).__name__)
@@ -8349,7 +8363,7 @@ async def api_admin_analytics(x_admin_token: Optional[str] = Header(None), days:
     if not ADMIN_TOKEN or not x_admin_token or not hmac.compare_digest(x_admin_token, ADMIN_TOKEN):
         raise HTTPException(401, "Invalid admin token.")
     days = max(1, min(days, 90))
-    since = (datetime.utcnow() - timedelta(days=days)).isoformat()
+    since = (utcnow() - timedelta(days=days)).isoformat()
     pipeline = [
         {"$match": {"ts": {"$gte": since}}},
         {"$group": {"_id": "$event", "count": {"$sum": 1}}},
@@ -8514,7 +8528,7 @@ async def api_scenario_from_jd(req: JDIngestReq, request: Request):
     jobs_col.update_one(
         {"ext_id": job.ext_id},
         {"$set": {**__import__('dataclasses').asdict(job),
-                  "cached_at": datetime.utcnow().isoformat()}},
+                  "cached_at": utcnow().isoformat()}},
         upsert=True,
     )
     if not scenarios_col.find_one({"fingerprint": template.fingerprint}, {"_id": 1}):
@@ -8550,7 +8564,7 @@ async def api_scenario_from_jd(req: JDIngestReq, request: Request):
     progress_col.update_one(
         {"user_id": uid},
         {"$set": {"current_career": resolved_career, "current_day": 1,
-                  "started_career_at": datetime.utcnow().isoformat()}},
+                  "started_career_at": utcnow().isoformat()}},
         upsert=True,
     )
     log.info("scenario.from_jd user=%s career=%s scenario=%s tasks=%d emails=%d",
@@ -8596,13 +8610,13 @@ async def api_slack_post(req: SlackPostReq):
         "channel": ch,
         "author": "you",
         "text": req.text,
-        "ts": datetime.utcnow().isoformat(),
+        "ts": utcnow().isoformat(),
     }
     slack_col.insert_one(row)
     actions_col.insert_one({
         "simulation_id": sim_id(),
         "action": f"slack:{ch}:{req.text[:200]}",
-        "ts": datetime.utcnow().isoformat(),
+        "ts": utcnow().isoformat(),
     })
     # Tone observer applies to Slack posts too
     observe_tone(req.text)
@@ -8620,7 +8634,7 @@ def _post_slack_system(channel: str, author: str, text: str) -> None:
         "channel": channel,
         "author": author,
         "text": text[:600],
-        "ts": datetime.utcnow().isoformat(),
+        "ts": utcnow().isoformat(),
         "system": True,
     })
 
@@ -8661,7 +8675,6 @@ _TOOL_BOT_NAME: dict[str, str] = {
 
 def _tool_summary(t: dict) -> dict:
     """Compact list-row payload for /api/tools."""
-    d = t.get("data") or {}
     progress = _tool_progress(t)
     return {
         "tool_id":   t["tool_id"],
@@ -8772,7 +8785,7 @@ async def api_tool_action(tool_id: str, req: ToolActionReq):
     # Persist mutation regardless of whether it earned points — the user's
     # work-in-progress should survive page reloads even on neutral edits.
     log_entry = {
-        "ts": datetime.utcnow().isoformat(),
+        "ts": utcnow().isoformat(),
         "action": req.action,
         "params": req.params,
         "ok": res["ok"],
@@ -8792,7 +8805,7 @@ async def api_tool_action(tool_id: str, req: ToolActionReq):
         actions_col.insert_one({
             "simulation_id": sim_id(),
             "action": f"tool:{t.get('tool_type','?')}:{req.action}:{pts:+d}",
-            "ts": datetime.utcnow().isoformat(),
+            "ts": utcnow().isoformat(),
         })
 
     # Manager feedback materialises as an email so it shows up in Outlook.
@@ -8959,7 +8972,7 @@ Examples:
     # Reuse the HTTP path's persistence + side-effects by replaying the
     # work inline. Keep it short — the agent doesn't need the long form.
     log_entry = {
-        "ts": datetime.utcnow().isoformat(),
+        "ts": utcnow().isoformat(),
         "action": action, "params": params,
         "ok": res["ok"], "points_delta": res.get("points_delta", 0),
         "message": res.get("message", "")[:240],
@@ -9083,7 +9096,7 @@ async def api_task_step(task_id: str, req: TaskStepReq):
     tasks_col.update_one(
         {"id": task_id, "simulation_id": sim_id(), "tool_workflow.step": req.step},
         {"$set": {"tool_workflow.$.done": True,
-                  "tool_workflow.$.done_at": datetime.utcnow().isoformat(),
+                  "tool_workflow.$.done_at": utcnow().isoformat(),
                   "tool_workflow.$.note": req.note or ""}},
     )
 
@@ -9108,7 +9121,7 @@ async def api_task_step(task_id: str, req: TaskStepReq):
         tasks_col.update_one(
             {"id": task_id, "simulation_id": sim_id()},
             {"$set": {"status": "done", "review_status": "pending_review",
-                      "completed_at": datetime.utcnow().isoformat(),
+                      "completed_at": utcnow().isoformat(),
                       "awarded_points": completion_credit}},
         )
         sessions_col.update_one(
@@ -9516,7 +9529,7 @@ async def interview_voice_ws(ws: WebSocket):
         try:
             await ws.close()
         except Exception:
-            pass
+            log.debug("hume.ws.close_failed", exc_info=True)
 
 
 app.mount("/", StaticFiles(directory="static", html=True), name="static")

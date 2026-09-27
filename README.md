@@ -14,9 +14,14 @@ AI-driven workplace simulator. Practise a real first day in a job — Outlook, S
 cp .env.example .env          # then fill in secrets
 python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
-bash run.sh
+uvicorn app:app --reload --port 8000 --workers 1
 ```
 Then open http://localhost:8000.
+
+Run with **one worker**. Rate limiting, the response caches and the background
+janitor all keep state in process, so extra workers give each their own copy and
+the limits stop being limits. `Procfile` and `railway.json` pin `--workers 1`
+for the same reason — scale with more instances behind a proxy, not more workers.
 
 ## Required env
 | Var | Purpose |
@@ -27,6 +32,15 @@ Then open http://localhost:8000.
 | `FIREWORKS_MODEL` | Optional. Default `deepseek-v4-pro-0813` |
 
 Optional: `LANGSMITH_API_KEY` (traces LLM runs at https://smith.langchain.com), `HUME_API_KEY`, `ADMIN_TOKEN`, `STRICT_ENV=1` (fail fast).
+
+## Tests
+The contract tests are standalone scripts (no pytest, no network, no DB):
+```bash
+for t in test_grc_model.py test_noise_alerts.py test_edr_telemetry.py test_password_reset.py test_retention.py; do python3 "$t"; done
+```
+`test_grc_writeback.py` needs a reachable `MONGO_URI`; `test_e2e_days.py` needs a
+running server. Lint with `ruff check .` (config in `ruff.toml`). CI runs both
+on every PR.
 
 ## Password reset
 Users reset their own password from the sign-in card via **Forgot password?**. The

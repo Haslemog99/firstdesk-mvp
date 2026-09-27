@@ -47,7 +47,8 @@ new `tool_type` only requires (a) a builder shape and (b) a validator.
 from __future__ import annotations
 
 from dataclasses import dataclass, field, asdict
-from datetime import datetime
+
+from utctime import utcnow
 from typing import Any, Callable, Optional
 import re
 
@@ -504,7 +505,7 @@ def validate_terminal_action(tool: dict, action: str, params: dict) -> DispatchR
         else:
             out_text = f"$ {cmd}\n(no error, no progress against the challenge)"
 
-    scrollback.append({"cmd": cmd, "output": out_text, "ts": datetime.utcnow().isoformat()})
+    scrollback.append({"cmd": cmd, "output": out_text, "ts": utcnow().isoformat()})
     # Cap scrollback to last 80 entries.
     if len(scrollback) > 80:
         del scrollback[: len(scrollback) - 80]

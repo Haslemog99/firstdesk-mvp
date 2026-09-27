@@ -7,7 +7,7 @@ AST-extracts the seed builders + enrichment + read-strip helpers from app.py
 so the test needs no Mongo, no FastAPI, no env — same discipline as
 test_noise_alerts.py / test_edr_telemetry.py.
 """
-import ast, re, sys, json, copy
+import ast, re, sys, json
 
 SRC = open("app.py").read()
 

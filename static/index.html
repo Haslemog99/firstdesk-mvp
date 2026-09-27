@@ -2147,7 +2147,7 @@ async function _loadLevelMeta(career){
   if(_isBeginner){
     const types=career==='cybersecurity'?['alerts','kanban']:career==='accountant'?['table']:career==='marketing'?['campaigns','calendar']:career==='developer'?['kanban']:career==='procurement'?['kanban','table']:career==='hr'?['kanban','table']:career==='pm'?['kanban','table']:career==='grc'?['kanban','table']:[];
     for(const t of types){
-      try{const r=await fetch(A+'/api/tooltips?tool_type='+encodeURIComponent(t));const d=await r.json();if(d&&d.tooltips){_tipsByType[t]=d.tooltips}}catch(e){}
+      try{const r=await fetch(A+'/api/tooltips?tool_type='+encodeURIComponent(t)+'&career='+encodeURIComponent(career||''));const d=await r.json();if(d&&d.tooltips){_tipsByType[t]=d.tooltips}}catch(e){}
     }
     await _loadStudyGuide(career);
   }else{

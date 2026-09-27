@@ -154,4 +154,4 @@ if fails:
     for f in fails[:25]:
         print("  ✗", f)
     sys.exit(1)
-print(f"PASS — 10 noise alerts, schema-exact, convention-clean, deterministic.")
+print("PASS — 10 noise alerts, schema-exact, convention-clean, deterministic.")
