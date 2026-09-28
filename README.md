@@ -36,11 +36,24 @@ Optional: `LANGSMITH_API_KEY` (traces LLM runs at https://smith.langchain.com), 
 ## Tests
 The contract tests are standalone scripts (no pytest, no network, no DB):
 ```bash
-for t in test_grc_model.py test_noise_alerts.py test_edr_telemetry.py test_password_reset.py test_retention.py test_career_palettes.py; do python3 "$t"; done
+for t in test_grc_model.py test_noise_alerts.py test_edr_telemetry.py test_password_reset.py test_retention.py test_career_palettes.py test_threat_alerts.py; do python3 "$t"; done
 ```
 `test_grc_writeback.py` needs a reachable `MONGO_URI`; `test_e2e_days.py` needs a
 running server. Lint with `ruff check .` (config in `ruff.toml`). CI runs both
 on every PR.
+
+## SOC simulation
+A cyber day's SIEM queue is assembled by `_cyber_day_alerts(day, sim)`: authored
+signal from `_CYBER_DAY_PACKS` for days 1–5, generated signal from
+`threat_engine.py` after that, plus procedural noise from
+`_generate_noise_alerts()`. The generator renders MITRE kill-chain templates
+over the simulation's own host/user pools — process tree, network and file
+events, raw log, playbook and ground truth (`is_real_threat`,
+`correct_action`, `points`) — so the shift never runs out of incidents and
+grading stays exact. Everything is seeded per `(simulation, day)`, so a queue
+is reproducible and re-inserting a day is idempotent. Add a scenario by writing
+a template function and registering it in `THREAT_TEMPLATES` / `FP_TEMPLATES`
+with its host kind and difficulty.
 
 ## Password reset
 Users reset their own password from the sign-in card via **Forgot password?**. The

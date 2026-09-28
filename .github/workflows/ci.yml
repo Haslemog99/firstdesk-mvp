@@ -21,7 +21,7 @@ jobs:
         run: python -c "import ast,pathlib; [ast.parse(p.read_text()) for p in pathlib.Path('.').glob('*.py')]"
       - name: Contract tests
         run: |
-          for t in test_grc_model.py test_noise_alerts.py test_edr_telemetry.py test_password_reset.py test_retention.py test_career_palettes.py; do
+          for t in test_grc_model.py test_noise_alerts.py test_edr_telemetry.py test_password_reset.py test_retention.py test_career_palettes.py test_threat_alerts.py; do
             echo "== $t"
             python "$t"
           done

@@ -31,6 +31,7 @@ from pydantic import BaseModel, BeforeValidator, Field, field_validator
 from pymongo import MongoClient
 from pymongo.errors import PyMongoError
 
+from threat_engine import generate_day_threats, threat_seed
 from utctime import utcnow
 
 # ── STRUCTURED LOGGING ────────────────────────────────────────────
@@ -1268,6 +1269,14 @@ _SOC_RULE_NAMES = {
     "malware":            "Known Malware Hash Detected on Endpoint (Threat Intel Match)",
     "ambiguous":          "Anomalous Process/Query Behaviour Requiring Analyst Review",
     "false_positive_travel": "Impossible-Travel Logon Outside Baseline Geography",
+    # Generated signal (threat_engine).
+    "malware_dropper":       "Office Application Spawning Script Interpreter",
+    "ransomware_prep":       "Shadow Copy Deletion / Recovery Inhibited (Pre-Encryption)",
+    "credential_theft":      "Browser Credential Store Accessed by Non-Browser Process",
+    "c2_beacon":             "Periodic Outbound Callbacks to Low-Reputation Domain",
+    "authorised_testing":    "Internal Network Service Discovery (Scanning Activity)",
+    "scheduled_deployment":  "Abnormal Outbound Data Volume to Untrusted External Host",
+    "authorised_admin":      "Remote Service Installation and Execution as SYSTEM",
 }
 
 # Curated threat-intel strings for day-1 external source IPs.
@@ -1566,6 +1575,18 @@ def _noise_templates(rng: "random.Random", pools: dict, mon_day: str) -> list:
 # 15 authored signal alerts); rollover days stay lighter so each day-pack's
 # 5 signal alerts aren't drowned at reveal time.
 _NOISE_PER_DAY = {1: 85, 2: 30, 3: 28, 4: 32, 5: 26}
+
+def _cyber_day_alerts(day: int, sim: str) -> list[dict]:
+    """One day's SIEM queue: authored signal where it exists, generated signal
+    everywhere else, plus procedural noise. Authored packs stop at day 5, so
+    past that threat_engine supplies the incidents and the simulation keeps
+    running indefinitely. Deterministic per (sim, day) end to end, which keeps
+    _insert_day_pack's id check idempotent on re-entry."""
+    signal = _CYBER_DAY_PACKS.get(day) or []
+    if not signal:
+        signal = generate_day_threats(day, threat_seed(sim, day), _NOISE_POOLS)
+    noise = _generate_noise_alerts(day, _NOISE_PER_DAY.get(day, 30), _noise_seed(sim, day))
+    return [_enrich_soc_alert(a) for a in signal + noise]
 
 def _noise_seed(sim: str, day: int) -> int:
     """Deterministic per (simulation, day): two sims differ, re-runs match —
@@ -6181,10 +6202,7 @@ async def api_advance_day():
     _sim = sim_id()
     # Cyber-specific SIEM alerts (legacy pack still drives the SIEM tab).
     if career == "cybersecurity":
-        revealed += _insert_day_pack(
-            [_enrich_soc_alert(a) for a in
-             (_CYBER_DAY_PACKS.get(nxt) or []) + _generate_noise_alerts(nxt, _NOISE_PER_DAY.get(nxt, 30), _noise_seed(_sim, nxt))],
-            siem_col, nxt, _sim)
+        revealed += _insert_day_pack(_cyber_day_alerts(nxt, _sim), siem_col, nxt, _sim)
     # Unified pack: emails/tasks/invoices/jira/campaigns for all careers.
     day_pack = (_DAY_PACKS.get(career) or {}).get(nxt) or {}
     for sub_key, col in _DAY_PACK_COLS.items():
@@ -6205,7 +6223,9 @@ async def api_next_day():
     sess = sessions_col.find_one({"session_id": session_id()}, {"_id": 0}) or {}
     career = sess.get("career")
     cur = int(sess.get("current_day") or 1)
-    if cur >= 5:
+    # Other careers run out of authored content at day 5; cyber generates its
+    # own queue past that, so it has no ceiling.
+    if cur >= 5 and career != "cybersecurity":
         return JSONResponse({"error": "max_day_reached", "current_day": cur}, status_code=400)
     _sim = sim_id()
 
@@ -6235,10 +6255,7 @@ async def api_next_day():
     nxt = cur + 1
     revealed = 0
     if career == "cybersecurity":
-        revealed += _insert_day_pack(
-            [_enrich_soc_alert(a) for a in
-             (_CYBER_DAY_PACKS.get(nxt) or []) + _generate_noise_alerts(nxt, _NOISE_PER_DAY.get(nxt, 30), _noise_seed(_sim, nxt))],
-            siem_col, nxt, _sim)
+        revealed += _insert_day_pack(_cyber_day_alerts(nxt, _sim), siem_col, nxt, _sim)
     day_pack = (_DAY_PACKS.get(career) or {}).get(nxt) or {}
     for sub_key, col in _DAY_PACK_COLS.items():
         revealed += _insert_day_pack(day_pack.get(sub_key) or [], col, nxt, _sim)
