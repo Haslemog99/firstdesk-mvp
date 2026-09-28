@@ -2245,9 +2245,11 @@ function _updateDayPill(career, day){
   const pill=document.getElementById('dayPill');if(!pill)return;
   if(!career){pill.style.display='none';return}
   pill.style.display='inline-flex';
-  pill.textContent='Day '+day+'/5';
+  // Cyber generates its own alert queue past day 5, so it has no last day.
+  const openEnded=(career==='cybersecurity');
+  pill.textContent='Day '+day+(openEnded?'':'/5');
   pill.title='Open end-of-day review — days advance from there, not here';
-  pill.disabled=(day>=5);
+  pill.disabled=(!openEnded && day>=5);
 }
 // ── SIMULATION CLOCK ─────────────────────────────────────
 let _simClockTimer=null, _simClockEnded=false;
@@ -3083,7 +3085,9 @@ function _siemSlaInfo(a){
   // date (day N = 2026-02-(17+N)). Comparing authored Feb-2026 timestamps
   // against real Date.now() showed every alert as BREACHED by months.
   const simHM=window._simNow||'12:00';
-  const dayDate=window._curDay?('2026-02-'+String(17+Number(window._curDay)).padStart(2,'0')):(a.timestamp||'').slice(0,10);
+  // Day N is N days after the 2026-02-17 epoch — rolled through Date so cyber
+  // days past the end of February still produce a valid date.
+  const dayDate=window._curDay?new Date(Date.UTC(2026,1,17+Number(window._curDay))).toISOString().slice(0,10):(a.timestamp||'').slice(0,10);
   const now=Date.parse(dayDate+'T'+simHM+':00Z')||Date.now();
   const remMs=due-now;
   if(remMs<=0){const over=Math.round(-remMs/60000);return{label:'BREACHED -'+over+'m',cls:'breached'}}
