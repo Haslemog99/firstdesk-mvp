@@ -279,7 +279,18 @@ _USER_CACHE_LIMIT = 200  # bounded; LRU-evict beyond this
 _user_orchestrators: "dict[str, Any]" = {}
 _user_chat_history: "dict[str, list]" = {}
 _user_locks: "dict[str, asyncio.Lock]" = {}
+_interview_locks: "dict[str, asyncio.Lock]" = {}
 _orchestrator_lock = asyncio.Lock()
+
+def _async_lock(registry: dict, key: str) -> asyncio.Lock:
+    """Per-key asyncio.Lock — serializes a section for one user/doc while
+    leaving different keys fully concurrent."""
+    lk = registry.get(key)
+    if lk is None:
+        lk = asyncio.Lock()
+        registry[key] = lk
+        _evict_if_full(registry)
+    return lk
 
 def _evict_if_full(d: dict, limit: int = _USER_CACHE_LIMIT) -> None:
     if len(d) > limit:
@@ -5763,50 +5774,51 @@ async def chat(req: ChatReq, request: Request, background: BackgroundTasks):
             emails_col.insert_one({"id": eid, "simulation_id": sm, "from_name": cfg["it"]["name"], "from_role": cfg["it"]["role"], "from_email": cfg["it"]["email"], "to": "all", "subject": f"✅ {ev['end_msg']}", "body": ev["end_msg"], "time": datetime.utcnow().strftime("%H:%M"), "read": False, "replied": False, "priority": "low", "category": "system", "requires_action": False})
             sessions_col.update_one({"session_id": sid}, {"$set": {"it_outage_active": False}})
 
-    history = get_chat_history()
-    # LangGraph react agent takes a single `messages` list. History tuples
-    # like ("human", "...") / ("ai", "...") are accepted directly.
-    messages_in = list(history) + [("human", req.message)]
-    try:
-        # orc.invoke is a blocking multi-round LLM call — offload it so the
-        # event loop stays free for other requests during the agent run.
-        result = await asyncio.to_thread(orc.invoke, {"messages": messages_in}, config=_ls_config("orchestrator"))
-    except Exception as ex:
-        log.exception("chat.invoke_crashed kind=%s", type(ex).__name__)
-        kind = type(ex).__name__
-        msg = str(ex).lower()
-        # Upstream LLM quota / rate limit — give the user a clear, actionable message
-        # without leaking the provider's raw JSON envelope.
-        if kind == "RateLimitError" or "rate_limit_exceeded" in msg or "rate limit" in msg or "quota" in msg:
-            return {"response": "The AI service is temporarily rate-limited. Please wait a moment and try again.", "error": "upstream_rate_limited"}
-        # Anything else → generic message, real details only in logs.
-        return {"response": "Something went wrong reaching the AI service. Please try again in a moment.", "error": "orchestrator_failed"}
-    msgs = result.get("messages") or []
-    log.debug("chat.result message_count=%d", len(msgs))
-    # Log the trace — tool calls + tool results — for parity with the old
-    # intermediate_steps logging. Each ToolMessage / AIMessage(tool_calls=...) is a step.
-    for i, m in enumerate(msgs[len(messages_in):]):
-        mtype = getattr(m, "type", m.__class__.__name__)
-        tcs = getattr(m, "tool_calls", None)
-        if tcs:
-            log.debug("chat.step idx=%d kind=%s tool_calls=%r", i, mtype, [(tc.get("name"), tc.get("args")) for tc in tcs])
-        else:
-            content_preview = str(getattr(m, "content", "") or "")[:200]
-            log.debug("chat.step idx=%d kind=%s content=%r", i, mtype, content_preview)
-    # Final AI reply is the last message's content.
-    final_msg = msgs[-1] if msgs else None
-    resp = (getattr(final_msg, "content", "") if final_msg else "") or "[empty output from agent — see server logs]"
-    cleaned = _clean_tool_json(resp)
-    if cleaned != resp:
-        log.info("chat.tool_json_unwrapped preview=%r", cleaned[:120])
-    resp = cleaned
-    memory_col.insert_one({"session_id": sid, "role": "human", "content": req.message, "ts": datetime.utcnow().isoformat()})
-    memory_col.insert_one({"session_id": sid, "role": "ai", "content": resp, "ts": datetime.utcnow().isoformat()})
-    history.append(("human", req.message))
-    history.append(("ai", resp))
-    # Trim chat_history to last 40 turns to keep token usage bounded over a long day
-    if len(history) > 80:
-        del history[:len(history)-80]
+    async with _async_lock(_user_locks, user["user_id"]):
+        history = get_chat_history()
+        # LangGraph react agent takes a single `messages` list. History tuples
+        # like ("human", "...") / ("ai", "...") are accepted directly.
+        messages_in = list(history) + [("human", req.message)]
+        try:
+            # orc.invoke is a blocking multi-round LLM call — offload it so the
+            # event loop stays free for other requests during the agent run.
+            result = await asyncio.to_thread(orc.invoke, {"messages": messages_in}, config=_ls_config("orchestrator"))
+        except Exception as ex:
+            log.exception("chat.invoke_crashed kind=%s", type(ex).__name__)
+            kind = type(ex).__name__
+            msg = str(ex).lower()
+            # Upstream LLM quota / rate limit — give the user a clear, actionable message
+            # without leaking the provider's raw JSON envelope.
+            if kind == "RateLimitError" or "rate_limit_exceeded" in msg or "rate limit" in msg or "quota" in msg:
+                return {"response": "The AI service is temporarily rate-limited. Please wait a moment and try again.", "error": "upstream_rate_limited"}
+            # Anything else → generic message, real details only in logs.
+            return {"response": "Something went wrong reaching the AI service. Please try again in a moment.", "error": "orchestrator_failed"}
+        msgs = result.get("messages") or []
+        log.debug("chat.result message_count=%d", len(msgs))
+        # Log the trace — tool calls + tool results — for parity with the old
+        # intermediate_steps logging. Each ToolMessage / AIMessage(tool_calls=...) is a step.
+        for i, m in enumerate(msgs[len(messages_in):]):
+            mtype = getattr(m, "type", m.__class__.__name__)
+            tcs = getattr(m, "tool_calls", None)
+            if tcs:
+                log.debug("chat.step idx=%d kind=%s tool_calls=%r", i, mtype, [(tc.get("name"), tc.get("args")) for tc in tcs])
+            else:
+                content_preview = str(getattr(m, "content", "") or "")[:200]
+                log.debug("chat.step idx=%d kind=%s content=%r", i, mtype, content_preview)
+        # Final AI reply is the last message's content.
+        final_msg = msgs[-1] if msgs else None
+        resp = (getattr(final_msg, "content", "") if final_msg else "") or "[empty output from agent — see server logs]"
+        cleaned = _clean_tool_json(resp)
+        if cleaned != resp:
+            log.info("chat.tool_json_unwrapped preview=%r", cleaned[:120])
+        resp = cleaned
+        memory_col.insert_one({"session_id": sid, "role": "human", "content": req.message, "ts": datetime.utcnow().isoformat()})
+        memory_col.insert_one({"session_id": sid, "role": "ai", "content": resp, "ts": datetime.utcnow().isoformat()})
+        history.append(("human", req.message))
+        history.append(("ai", resp))
+        # Trim chat_history to last 40 turns to keep token usage bounded over a long day
+        if len(history) > 80:
+            del history[:len(history)-80]
     return {"response": resp}
 
 @app.post("/api/email/{email_id}/read")
@@ -5872,6 +5884,13 @@ async def api_reply(req: ReplyReq, request: Request, background: BackgroundTasks
         _session_id_var.set(sid_)
         _career_var.set(career_)
         _user_id_var.set(uid_)
+        # The task outlives the request — if the user reset or restarted the
+        # sim in between, its inbox was cleared (or a new sim reused the same
+        # email ids), and this doc is gone or replaced. Skip everything so a
+        # stale follow-up can't land in a fresh simulation.
+        cur = emails_col.find_one({"id": e_["id"], "simulation_id": sm_}, {"_id": 1})
+        if not cur or cur["_id"] != e_.get("_id"):
+            return
         try:
             observe_tone(msg_)
             check_escalations()
@@ -9292,64 +9311,65 @@ async def interview_answer(req: InterviewAnswerReq, request: Request):
     user = request.state.user
     _require_paid(user)
     engine = get_interview_engine()
-    doc = engine.load(req.interview_id, user["user_id"])
-    if not doc:
-        raise HTTPException(404, "Interview not found.")
-    if doc.get("status") == "completed":
-        raise HTTPException(409, "This interview is already completed.")
+    async with _async_lock(_interview_locks, req.interview_id):
+        doc = engine.load(req.interview_id, user["user_id"])
+        if not doc:
+            raise HTTPException(404, "Interview not found.")
+        if doc.get("status") == "completed":
+            raise HTTPException(409, "This interview is already completed.")
 
-    round_doc = next((r for r in (doc.get("rounds") or []) if r.get("round") == req.round), None)
-    if not round_doc:
-        raise HTTPException(404, "Round not found.")
-    question = next((q for q in (round_doc.get("questions") or [])
-                     if q.get("id") == req.question_id), None)
-    if not question:
-        raise HTTPException(404, "Question not found.")
+        round_doc = next((r for r in (doc.get("rounds") or []) if r.get("round") == req.round), None)
+        if not round_doc:
+            raise HTTPException(404, "Round not found.")
+        question = next((q for q in (round_doc.get("questions") or [])
+                         if q.get("id") == req.question_id), None)
+        if not question:
+            raise HTTPException(404, "Question not found.")
 
-    sim_summary = None
-    if doc.get("mode") == "post_sim":
-        sim_summary = build_simulation_summary(
-            sessions_col=sessions_col, tasks_col=tasks_col,
-            actions_col=actions_col, reputation_col=reputation_col,
-            progress_col=progress_col,
-            user_id=user["user_id"],
-            simulation_id=doc.get("simulation_id") or sim_id(),
+        sim_summary = None
+        if doc.get("mode") == "post_sim":
+            sim_summary = build_simulation_summary(
+                sessions_col=sessions_col, tasks_col=tasks_col,
+                actions_col=actions_col, reputation_col=reputation_col,
+                progress_col=progress_col,
+                user_id=user["user_id"],
+                simulation_id=doc.get("simulation_id") or sim_id(),
+            )
+
+        evaluation = await asyncio.to_thread(
+            engine.evaluate_answer,
+            question=question,
+            transcript=req.transcript,
+            emotion_data=req.emotion_data,
+            body_language=req.body_language,
+            simulation_summary=sim_summary,
+            duration_sec=req.duration_sec,
         )
+        updated = engine.save_answer(
+            interview_id=req.interview_id, user_id=user["user_id"],
+            round_num=req.round, question_id=req.question_id, evaluation=evaluation,
+        )
+        if not updated:
+            raise HTTPException(500, "Failed to save evaluation.")
 
-    evaluation = await asyncio.to_thread(
-        engine.evaluate_answer,
-        question=question,
-        transcript=req.transcript,
-        emotion_data=req.emotion_data,
-        body_language=req.body_language,
-        simulation_summary=sim_summary,
-        duration_sec=req.duration_sec,
-    )
-    updated = engine.save_answer(
-        interview_id=req.interview_id, user_id=user["user_id"],
-        round_num=req.round, question_id=req.question_id, evaluation=evaluation,
-    )
-    if not updated:
-        raise HTTPException(500, "Failed to save evaluation.")
-
-    # Determine the next prompt for the FE (next question, next round, or done).
-    next_pointer: dict = {"next": None}
-    rounds = updated.get("rounds") or []
-    cur_round = next((r for r in rounds if r.get("round") == req.round), None)
-    if cur_round:
-        unanswered = [q for q in cur_round.get("questions", [])
-                      if q.get("content_score") is None]
-        if unanswered:
-            next_pointer = {"next": "question", "round": req.round,
-                            "question_id": unanswered[0]["id"],
-                            "question": unanswered[0]}
-        else:
-            following = next((r for r in rounds if r.get("round") == req.round + 1), None)
-            if following and following.get("questions"):
-                next_pointer = {"next": "round", "round": following["round"],
-                                "round_data": following}
+        # Determine the next prompt for the FE (next question, next round, or done).
+        next_pointer: dict = {"next": None}
+        rounds = updated.get("rounds") or []
+        cur_round = next((r for r in rounds if r.get("round") == req.round), None)
+        if cur_round:
+            unanswered = [q for q in cur_round.get("questions", [])
+                          if q.get("content_score") is None]
+            if unanswered:
+                next_pointer = {"next": "question", "round": req.round,
+                                "question_id": unanswered[0]["id"],
+                                "question": unanswered[0]}
             else:
-                next_pointer = {"next": "done"}
+                following = next((r for r in rounds if r.get("round") == req.round + 1), None)
+                if following and following.get("questions"):
+                    next_pointer = {"next": "round", "round": following["round"],
+                                    "round_data": following}
+                else:
+                    next_pointer = {"next": "done"}
 
     return {
         "interview_id": req.interview_id,
