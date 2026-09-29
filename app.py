@@ -79,6 +79,7 @@ from scenario_engine import (
     FILES_LINK,
     CI_LINK,
     MEETING_LINK,
+    REVIEW_ARTIFACT_KINDS,
 )
 from tool_dispatch import (
     SUPPORTED_TYPES as TOOL_SUPPORTED_TYPES,
@@ -1040,6 +1041,219 @@ def _task_complete_block(t: dict) -> Optional[tuple[str, str]]:
             "Open the in-sim attachment on the related email first — the paperclip is the evidence.",
         )
     return None
+
+
+# ── MANAGER REVIEW EVIDENCE GATE ─────────────────────────────────
+# Tasks can declare `expected_artifacts` (kinds in REVIEW_ARTIFACT_KINDS) and a
+# `review_rubric`. Before an "approved" verdict lands, the server checks each
+# expected artifact exists in sim state — the LLM grades quality, but it may
+# not approve work that provably isn't there. Missing evidence → the verdict
+# is bounced back to the manager as needs_rework material.
+
+_EMAIL_REPLY_HINTS = (
+    "reply", "respond to", "respond by email", "email back", "write back",
+    "follow up", "follow-up", "send an email", "send the email", "chase the client",
+)
+
+
+def _tool_action_logged(hint: str) -> bool:
+    """Any ok action logged in a tool whose name/type/category matches the hint."""
+    hint = (hint or "").strip().lower()
+    if not hint:
+        return False
+    for tool_doc in tools_col.find({"simulation_id": sim_id()}, {"_id": 0}):
+        blob = " ".join(str(tool_doc.get(k) or "") for k in ("tool_id", "name", "tool_type", "category")).lower()
+        if hint in blob and any(e.get("ok") for e in (tool_doc.get("actions_log") or [])):
+            return True
+    return False
+
+
+def _artifact_present(spec: str, task: dict) -> bool:
+    """Deterministic evidence check for one declared/inferred artifact spec."""
+    kind, _, arg = spec.partition(":")
+    kind = kind.strip().lower()
+    arg = arg.strip()
+    if kind == "hr_onboarding":
+        return bool(_hr_onboarding_submitted())
+    if kind == "training":
+        return bool(_training_submitted())
+    if kind == "it_setup":
+        return bool(_it_setup_submitted())
+    if kind == "files":
+        return bool(_files_saved())
+    if kind in ("jira_comment", "comp014_comment"):
+        tid = arg or "COMP-014"
+        if tid == "COMP-014":
+            return _comp014_has_evidence()
+        tkt = jira_col.find_one({"id": tid, "simulation_id": sim_id()}, {"_id": 0}) or {}
+        # `live` marks comments added during the sim — seed data also ships
+        # "you" comments and must not satisfy the gate.
+        return any(
+            (c.get("author") == "you") and c.get("live") and str(c.get("text") or "").strip()
+            for c in (tkt.get("comments") or [])
+        )
+    if kind == "attachment_opened":
+        return bool(_attachments_viewed())
+    if kind == "email_reply":
+        q: dict = {"simulation_id": sim_id(), "replied": True}
+        if arg:
+            q["subject"] = {"$regex": re.escape(arg), "$options": "i"}
+        return bool(emails_col.find_one(q, {"_id": 0}))
+    if kind == "slack_post":
+        q = {"simulation_id": sim_id(), "author": "you"}
+        if arg:
+            q["channel"] = arg if arg.startswith("#") else f"#{arg}"
+        return bool(slack_col.find_one(q, {"_id": 0}))
+    if kind == "siem_triage":
+        if arg:
+            a = siem_col.find_one({"id": arg, "simulation_id": sim_id()}, {"_id": 0}) or {}
+            return a.get("triage_status") in ("reviewed", "investigating")
+        s = sessions_col.find_one({"session_id": session_id()}, {"alerts_triaged": 1}) or {}
+        return bool(s.get("alerts_triaged"))
+    if kind == "journal_posted":
+        s = sheets_col.find_one({"simulation_id": sim_id()}) or {}
+        return any(e.get("posted_by") == "you" for e in (s.get("general_ledger") or []))
+    if kind == "discrepancy_flagged":
+        s = sessions_col.find_one({"session_id": session_id()}, {"discrepancies_found": 1}) or {}
+        return bool(s.get("discrepancies_found"))
+    if kind == "meeting_attended":
+        s = sessions_col.find_one({"session_id": session_id()}, {"meetings": 1}) or {}
+        return any((r or {}).get("state") == "attended" for r in (s.get("meetings") or {}).values())
+    if kind == "tool_workflow":
+        wf = task.get("tool_workflow") or []
+        return bool(wf) and all(
+            bool(step.get("done")) or _tool_action_logged(step.get("tool") or "")
+            for step in wf
+        )
+    if kind == "tool_action":
+        return _tool_action_logged(arg)
+    # Unknown kind → don't gate (registry stays extensible, fail-open).
+    return True
+
+
+_ARTIFACT_LABELS = {
+    "hr_onboarding": "HR portal submission",
+    "training": "submitted training modules",
+    "it_setup": "submitted IT-setup checklist",
+    "files": "file saved to the shared drive",
+    "jira_comment": "user comment on the Jira ticket",
+    "comp014_comment": "evidence comment on COMP-014",
+    "attachment_opened": "an opened in-sim attachment",
+    "email_reply": "a replied email",
+    "slack_post": "a Slack message from the user",
+    "siem_triage": "a triaged SIEM alert",
+    "journal_posted": "a journal entry posted by the user",
+    "discrepancy_flagged": "a flagged reconciliation discrepancy",
+    "meeting_attended": "an attended meeting",
+    "tool_workflow": "completed workflow steps (or matching tool actions)",
+    "tool_action": "a logged action in the required tool",
+}
+
+
+def _expected_artifacts_for(t: dict) -> list[str]:
+    """Declared expected_artifacts plus the ones inferred from the task text —
+    the same heuristics _task_complete_block uses, applied to review."""
+    arts: list[str] = [
+        a for a in (t.get("expected_artifacts") or [])
+        if isinstance(a, str) and a.split(":", 1)[0].strip().lower() in REVIEW_ARTIFACT_KINDS
+    ]
+    b = _task_blob(t)
+    career = get_career() or ""
+    if t.get("tool_workflow"):
+        arts.append("tool_workflow")
+    if _is_onboarding_forms_task(t):
+        arts.append("hr_onboarding")
+    if _needs_training(t) and _TRAINING_MODULES.get(career):
+        arts.append("training")
+    if _needs_it_setup(t) and _IT_SETUP_ITEMS.get(career):
+        arts.append("it_setup")
+    if _needs_files(t):
+        arts.append("files")
+    if _needs_comp014(t):
+        arts.append("jira_comment:COMP-014")
+    if _needs_attachment(t):
+        arts.append("attachment_opened")
+    if career == "accountant" and looks_like(b, ("reconcil", "discrepanc", "bank statement")):
+        arts.append("discrepancy_flagged")
+    if career == "cybersecurity" and looks_like(b, ("triage", "alert", "siem")):
+        arts.append("siem_triage")
+    if looks_like(b, MEETING_HINTS):
+        arts.append("meeting_attended")
+    if looks_like(b, _EMAIL_REPLY_HINTS):
+        arts.append("email_reply")
+    seen: set[str] = set()
+    out: list[str] = []
+    for a in arts:
+        if a not in seen:
+            seen.add(a)
+            out.append(a)
+    return out
+
+
+def _review_evidence_missing(t: dict) -> list[str]:
+    """Human-readable list of expected evidence the sim state does not show."""
+    missing = []
+    for spec in _expected_artifacts_for(t):
+        if not _artifact_present(spec, t):
+            kind = spec.split(":", 1)[0].strip().lower()
+            label = _ARTIFACT_LABELS.get(kind, spec)
+            if ":" in spec:
+                label = f"{label} ({spec.split(':', 1)[1].strip()})"
+            missing.append(label)
+    return missing
+
+
+def _run_manager_review_sync(uid: str, sm: str, sid: str, career: Optional[str]) -> None:
+    """BackgroundTasks entrypoint — run a manager review pass over every
+    pending_review task so verdict + feedback email land without the user
+    needing to send a chat message first."""
+    _sim_id_var.set(sm)
+    _session_id_var.set(sid)
+    _career_var.set(career)
+    _user_id_var.set(uid)
+    try:
+        for _ in range(3):  # completions landing mid-review get one more sweep
+            pend = list(tasks_col.find(
+                {"simulation_id": sm, "review_status": "pending_review"},
+                {"_id": 0, "id": 1, "title": 1}))
+            if not pend:
+                break
+            orc = get_orchestrator()
+            if orc is None:
+                return
+            titles = ", ".join(f"'{p['title']}' (id:{p['id']})" for p in pend)
+            msg = (
+                "[SYSTEM EVENT — not a user message] "
+                f"{titles} {'is' if len(pend) == 1 else 'are'} now pending_review. "
+                "Run your MANAGER TASK REVIEW on each right now: inspect the real evidence "
+                "(get_tool_data / read_email / slack_read), call manager_review_task with a "
+                "verdict, then inject_email the user your feedback. "
+                "Keep your visible reply to one line — the user will not see this turn."
+            )
+            try:
+                orc.invoke({"messages": [("human", msg)]}, config=_ls_config("auto_review"))
+            except Exception:
+                log.exception("auto_review.invoke_failed uid=%s", uid)
+                break
+    finally:
+        sessions_col.update_one(
+            {"session_id": sid},
+            {"$unset": {"review_in_flight": "", "review_in_flight_at": ""}},
+        )
+
+
+def _queue_manager_review(background: BackgroundTasks, uid: str) -> None:
+    """Schedule one dedup'd review pass for the current user. Concurrent
+    completions collapse onto the in-flight pass; a stuck flag expires in 15m."""
+    stale = (datetime.utcnow() - timedelta(minutes=15)).isoformat()
+    claimed = sessions_col.update_one(
+        {"session_id": session_id(),
+         "$or": [{"review_in_flight": {"$ne": True}},
+                 {"review_in_flight_at": {"$lt": stale}}]},
+        {"$set": {"review_in_flight": True, "review_in_flight_at": datetime.utcnow().isoformat()}},
+    )
+    if claimed.modified_count:
+        background.add_task(_run_manager_review_sync, uid, sim_id(), session_id(), get_career())
 
 def _seed_accountant_artifacts(cfg):
     """Career-specific Sage data (spreadsheets, invoices, system events).
@@ -3419,7 +3633,17 @@ def send_reply(email_id: str, reply_text: str) -> str:
 def get_tasks() -> str:
     """Get task list with status, priority, deadline, points."""
     ts = list(tasks_col.find({"simulation_id": sim_id()}, {"_id": 0}))
-    return "\n".join([f"{'✅' if t['status']=='done' else '🔲'} [{t['priority'].upper()}] {t['title']} | Due:{t['deadline']} | {t['points']}pts | id:{t['id']}" for t in ts])
+    lines = []
+    for t in ts:
+        line = f"{'✅' if t['status']=='done' else '🔲'} [{t['priority'].upper()}] {t['title']} | Due:{t['deadline']} | {t['points']}pts | id:{t['id']}"
+        if t.get("review_status") == "pending_review":
+            ea = _expected_artifacts_for(t)
+            if ea:
+                line += f" | evidence:{','.join(ea)}"
+            if t.get("review_rubric"):
+                line += f" | rubric:{t['review_rubric']}"
+        lines.append(line)
+    return "\n".join(lines)
 
 @tool
 def complete_task(task_id: str) -> str:
@@ -3444,27 +3668,75 @@ def complete_task(task_id: str) -> str:
 def manager_review_task(task_id: str, verdict: str, feedback: str) -> str:
     """As the MANAGER, review a completed task and award satisfaction points.
     verdict: 'approved' (pay 80% of task points + ack email), 'needs_rework' (no points, sends task back), 'rejected' (small penalty + critical email).
-    feedback MUST reference specific evidence from the actual work (real ledger entries / Jira comments / campaign content / email replies). Generic praise is not allowed."""
+    feedback MUST reference specific evidence from the actual work (real ledger entries / Jira comments / campaign content / email replies). Generic praise is not allowed.
+    'approved' is gated server-side: expected evidence artifacts are checked deterministically and a missing artifact blocks approval."""
     t = tasks_col.find_one({"id": task_id, "simulation_id": sim_id()}, {"_id": 0})
     if not t: return "Task not found."
-    if t.get("review_status") == "approved": return "Already approved — cannot re-review."
+    if t.get("status") != "done":
+        return "Nothing to review — the task isn't marked complete yet."
+    verdict = (verdict or "").strip().lower()
+    if verdict not in ("approved", "needs_rework", "rejected"):
+        return "Invalid verdict. Use: approved | needs_rework | rejected."
+    # Atomic claim: pending_review → reviewing, so two concurrent review calls
+    # can't both award. A claim older than 10 min is treated as abandoned — the
+    # claim token means a stale reviewer's verdict write can't land on a claim
+    # that was since reclaimed by someone else.
+    stale = (datetime.utcnow() - timedelta(minutes=10)).isoformat()
+    claim_id = secrets.token_hex(8)
+    claim = tasks_col.update_one(
+        {"id": task_id, "simulation_id": sim_id(),
+         "$or": [{"review_status": "pending_review"},
+                 {"review_status": {"$exists": False}},
+                 {"review_status": "reviewing", "review_started_at": {"$lt": stale}}]},
+        {"$set": {"review_status": "reviewing", "review_started_at": datetime.utcnow().isoformat(),
+                  "review_claim_id": claim_id}},
+    )
+    if claim.modified_count == 0:
+        cur = tasks_col.find_one({"id": task_id, "simulation_id": sim_id()}, {"_id": 0, "review_status": 1})
+        if (cur or {}).get("review_status") == "approved":
+            return "Already approved — cannot re-review."
+        return "Review already in progress — try again shortly."
+    if verdict == "approved":
+        missing = _review_evidence_missing(t)
+        if missing:
+            tasks_col.update_one(
+                {"id": task_id, "simulation_id": sim_id(), "review_claim_id": claim_id},
+                {"$set": {"review_status": "pending_review"},
+                 "$unset": {"review_started_at": "", "review_claim_id": ""}})
+            return ("⛔ APPROVAL BLOCKED by the evidence gate. Missing: " + "; ".join(missing)
+                    + ". Check the right surface (get_tool_data / read_email / slack_read). "
+                    "If the work genuinely isn't there, use verdict='needs_rework' and say what's missing.")
     base = t["points"]
+    _claim_lost = ("Review claim expired before the verdict landed — "
+                   "call manager_review_task again to retry.")
     if verdict == "approved":
         bonus = _apply_level_weight(int(base * 0.8), "task")
-        tasks_col.update_one({"id": task_id, "simulation_id": sim_id()},
-            {"$set": {"review_status": "approved"}, "$inc": {"awarded_points": bonus}})
+        landed = tasks_col.update_one(
+            {"id": task_id, "simulation_id": sim_id(), "review_claim_id": claim_id},
+            {"$set": {"review_status": "approved"}, "$inc": {"awarded_points": bonus},
+             "$unset": {"review_started_at": "", "review_claim_id": ""}})
+        if landed.modified_count == 0:
+            return _claim_lost
         _ack_correct("task_review", f"Re: {t['title']}", feedback, points=bonus)
         return f"✅ Approved. Manager awarded +{bonus}pts satisfaction bonus and emailed feedback."
     elif verdict == "needs_rework":
         rework_pen = _apply_level_weight(-3, "task")
-        tasks_col.update_one({"id": task_id, "simulation_id": sim_id()},
-            {"$set": {"review_status": "needs_rework", "status": "pending"}})
+        landed = tasks_col.update_one(
+            {"id": task_id, "simulation_id": sim_id(), "review_claim_id": claim_id},
+            {"$set": {"review_status": "needs_rework", "status": "pending"},
+             "$unset": {"review_started_at": "", "review_claim_id": ""}})
+        if landed.modified_count == 0:
+            return _claim_lost
         _flag_mistake("task_rework", f"Re: {t['title']} — please revise", feedback, points=rework_pen)
         return f"↩️ Sent back for rework. {rework_pen:+d}pts and task reopened. User must redo and resubmit."
     elif verdict == "rejected":
         penalty = _apply_level_weight(-max(5, int(base * 0.25)), "task")
-        tasks_col.update_one({"id": task_id, "simulation_id": sim_id()},
-            {"$set": {"review_status": "rejected"}})
+        landed = tasks_col.update_one(
+            {"id": task_id, "simulation_id": sim_id(), "review_claim_id": claim_id},
+            {"$set": {"review_status": "rejected"},
+             "$unset": {"review_started_at": "", "review_claim_id": ""}})
+        if landed.modified_count == 0:
+            return _claim_lost
         _flag_mistake("task_reject", f"Re: {t['title']} — rejected", feedback, points=penalty)
         return f"❌ Rejected. {penalty:+d}pts and critical feedback emailed."
     return "Invalid verdict. Use: approved | needs_rework | rejected."
@@ -4353,6 +4625,7 @@ MANAGER TASK REVIEW (this is the PRIMARY scoring mechanism — most points come 
   * verdict="rejected" — actively wrong work (wrong amount, false-positive on a real threat, stale brand colour). Penalty + critical feedback. Cite the specific mistake.
 - The user should FEEL their grade depends on the manager's read of their work, not on ticking checkboxes.
 - Never approve a task without checking the underlying tool data first. If unsure, mark needs_rework and ask for clarification by inject_email.
+- Tasks may list `evidence:` requirements and a `rubric:` in get_tasks — the server verifies evidence artifacts deterministically. If manager_review_task returns APPROVAL BLOCKED, the artifact genuinely isn't in the sim: do NOT retry 'approved' on the same state — either find it on the right surface or mark needs_rework saying exactly what's missing.
 
 PROGRESSIVE WORK INJECTION (the day must NEVER run out of work):
 - Check tasks_completed count via get_session_state on EVERY response.
@@ -4470,6 +4743,23 @@ WHAT YOU DO:
 
 NEVER assign work. Never review task quality. Never gossip or speculate. Keep replies short, factual, and in writing."""
 
+def _client_prompt(career: str, experience_level: str) -> str:
+    cfg = CAREER_CONFIGS[career]
+    return f"""You are {cfg['client']['name']} ({cfg['client']['role']}) — an EXTERNAL client of {cfg['company']}, not a colleague of the user.
+
+YOUR PERSONA:
+- Terse, results-focused, a little impatient. You pay for outcomes, not effort.
+- You can't see internal tools, tickets or office politics — don't pretend to.
+- You want YOUR deliverable: status, dates, plain-English answers.
+
+WHAT YOU DO:
+- Chase the deliverables owed to you; ask for status, ETAs, and specifics.
+- React to what the user tells you: satisfied → brief acknowledgement; vague or stalled → push harder.
+- If the user keeps ignoring you or fobs you off, complain to their manager via agent_to_agent_email (cc_user=True) — that's how real clients escalate.
+- Use inject_email when you want something in writing for the user.
+
+NEVER assign internal work. NEVER review or score the user's work — that's {cfg['manager']['name']}'s job. You are not their boss; you are the customer."""
+
 def _make_sub_agent(prompt: str, tools: list):
     return create_react_agent(model=llm, tools=tools, prompt=prompt)
 
@@ -4488,11 +4778,12 @@ def _classify_route(state: _OrcState) -> dict:
     if not text:
         return {"route": "manager"}
     sys = (
-        "You route a user message to ONE of three NPCs in a workplace simulator. "
-        "Reply with ONE word only — manager, teammate, or hr.\n"
+        "You route a user message to ONE of four NPCs in a workplace simulator. "
+        "Reply with ONE word only — manager, teammate, hr, or client.\n"
         "- manager: task assignment, status updates, review/approval, deadlines, deliverables, most operational questions. THE DEFAULT.\n"
         "- teammate: peer-level chat — 'what would you do', 'how does X work', second opinions, casual banter.\n"
-        "- hr: conduct issues, complaints about colleagues, code-of-conduct, formal escalation, tone problems."
+        "- hr: conduct issues, complaints about colleagues, code-of-conduct, formal escalation, tone problems.\n"
+        "- client: the external customer — chasing their deliverables, client-facing questions, complaints about delays or quality."
     )
     try:
         resp = llm.invoke([("system", sys), ("human", text)], config=_ls_config("supervisor_route"))
@@ -4500,7 +4791,7 @@ def _classify_route(state: _OrcState) -> dict:
     except Exception as ex:
         log.warning("supervisor.route_failed kind=%s falling back to manager", type(ex).__name__)
         choice = "manager"
-    if choice not in ("manager", "teammate", "hr"):
+    if choice not in ("manager", "teammate", "hr", "client"):
         choice = "manager"
     log.debug("supervisor.route=%s", choice)
     return {"route": choice}
@@ -4532,10 +4823,14 @@ def create_orchestrator(career, experience_level: str = "studied"):
         "get_inbox", "get_session_state", "get_reputation",
         "inject_email", "agent_to_agent_email", "add_performance_note",
     )
+    client_tools = _pick(
+        "get_session_state", "inject_email", "agent_to_agent_email",
+    )
 
     manager_agent = _make_sub_agent(_manager_prompt(career, experience_level), manager_tools)
     teammate_agent = _make_sub_agent(_teammate_prompt(career, experience_level), teammate_tools)
     hr_agent = _make_sub_agent(_hr_prompt(career, experience_level), hr_tools)
+    client_agent = _make_sub_agent(_client_prompt(career, experience_level), client_tools)
 
     def _run_sub(agent):
         """Run a sub-agent on the current conversation. We return ONLY the new
@@ -4553,15 +4848,17 @@ def create_orchestrator(career, experience_level: str = "studied"):
     g.add_node("manager", _run_sub(manager_agent))
     g.add_node("teammate", _run_sub(teammate_agent))
     g.add_node("hr", _run_sub(hr_agent))
+    g.add_node("client", _run_sub(client_agent))
     g.add_edge(START, "supervisor")
     g.add_conditional_edges(
         "supervisor",
         lambda s: s.get("route") or "manager",
-        {"manager": "manager", "teammate": "teammate", "hr": "hr"},
+        {"manager": "manager", "teammate": "teammate", "hr": "hr", "client": "client"},
     )
     g.add_edge("manager", END)
     g.add_edge("teammate", END)
     g.add_edge("hr", END)
+    g.add_edge("client", END)
     return g.compile()
 
 # ══════════════════════════════════════════
@@ -5944,9 +6241,10 @@ async def api_tasks():
     return {"tasks": tasks}
 
 @app.post("/api/task/{task_id}/complete")
-async def api_complete_task(task_id: str):
+async def api_complete_task(task_id: str, background: BackgroundTasks):
     """User-side completion. Awards the small (20%) completion credit. The remaining
-    80% only lands when the manager reviews the work via manager_review_task."""
+    80% only lands when the manager reviews the work via manager_review_task —
+    a background review pass is queued here so the user isn't forced to chat first."""
     t = tasks_col.find_one({"id": task_id, "simulation_id": sim_id()}, {"_id": 0})
     if not t:
         return _err("not_found", "Task not found.", status=404)
@@ -5968,6 +6266,7 @@ async def api_complete_task(task_id: str):
     )
     emit("task_completed", {"task": t})
     _touch_activity()
+    _queue_manager_review(background, user_id() or "")
     return {"ok": True, "task": t, "completion_credit": completion_credit, "awaiting_review": True,
             "message": f"+{completion_credit}pts completion credit. Manager will review your work for the rest."}
 
@@ -6917,7 +7216,7 @@ async def api_sage_journal(req: JournalReq):
     if (req.dr > 0 and req.cr > 0) or (req.dr <= 0 and req.cr <= 0):
         raise HTTPException(400, "Either Debit OR Credit must be > 0 (not both, not neither).")
     ref = (req.ref or f"ADJ-{uuid.uuid4().hex[:4].upper()}").strip()
-    entry = {"date": req.date, "acc": req.acc, "desc": req.desc, "dr": req.dr, "cr": req.cr, "ref": ref}
+    entry = {"date": req.date, "acc": req.acc, "desc": req.desc, "dr": req.dr, "cr": req.cr, "ref": ref, "posted_by": "you"}
     sheets_col.update_one({"simulation_id": sim_id()}, {"$push": {"general_ledger": entry}})
 
     # Validate against the seeded discrepancies (the "right answers")
@@ -6976,7 +7275,7 @@ async def api_jira_update(ticket_id: str, req: JiraUpdateReq):
     if req.comment:
         jira_col.update_one(
             {"id": ticket_id, "simulation_id": sim_id()},
-            {"$push": {"comments": {"author": "you", "text": req.comment, "ts": datetime.utcnow().isoformat()}}},
+            {"$push": {"comments": {"author": "you", "text": req.comment, "ts": datetime.utcnow().isoformat(), "live": True}}},
         )
 
     if update_set:
@@ -9064,7 +9363,7 @@ class TaskStepReq(BaseModel):
     note: SafeOptStr = Field("", max_length=600)
 
 @app.post("/api/task/{task_id}/step")
-async def api_task_step(task_id: str, req: TaskStepReq):
+async def api_task_step(task_id: str, req: TaskStepReq, background: BackgroundTasks):
     """Mark one step of a multi-tool task workflow as done.
     Other tools in the workflow get notified (slack broadcast + email log)."""
     t = tasks_col.find_one({"id": task_id, "simulation_id": sim_id()}, {"_id": 0})
@@ -9119,6 +9418,7 @@ async def api_task_step(task_id: str, req: TaskStepReq):
         emit("task_workflow_completed", {"task": fresh})
         _post_slack_system(primary_ch, "FirstDesk Workflow",
                            f"[{task_id}] all {len(workflow)} steps complete — handed to manager for review.")
+        _queue_manager_review(background, user_id() or "")
 
     return {"ok": True, "task": tasks_col.find_one({"id": task_id, "simulation_id": sim_id()}, {"_id": 0}),
             "all_steps_done": all_done}

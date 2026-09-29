@@ -78,6 +78,16 @@ DEFAULT_SLACK_CHANNELS: dict[str, tuple[str, ...]] = {
     "developer":     ("#engineering", "#incidents", "#general"),
 }
 
+# Kinds of `expected_artifacts` a task may declare — the server's review gate
+# verifies each one deterministically before allowing an 'approved' verdict.
+# A kind may carry a suffix argument after ':' (e.g. "jira_comment:COMP-014").
+REVIEW_ARTIFACT_KINDS = (
+    "hr_onboarding", "training", "it_setup", "files", "jira_comment",
+    "attachment_opened", "email_reply", "slack_post", "siem_triage",
+    "journal_posted", "discrepancy_flagged", "meeting_attended",
+    "tool_action", "tool_workflow",
+)
+
 
 @dataclass
 class JobPosting:
@@ -277,7 +287,9 @@ Output ONLY a single JSON object matching this schema (no prose, no markdown fen
         {"step": 1, "tool": "outlook",  "action": "Concrete action sentence"},
         {"step": 2, "tool": "sage",     "action": "..."},
         {"step": 3, "tool": "slack",    "action": "..."}
-      ]
+      ],
+      "expected_artifacts": ["OPTIONAL — server-verifiable evidence the manager's review can check. Pick only what this task truly requires: hr_onboarding, training, it_setup, files, jira_comment:<TICKET-ID>, attachment_opened, email_reply[:<subject words>], slack_post[:#channel], siem_triage[:<ALERT-ID>], journal_posted, discrepancy_flagged, meeting_attended, tool_action:<tool name>"],
+      "review_rubric": "1-2 sentences describing what 'done well' means — the manager grades against this."
     }
   ],
   "slack_seed": [
@@ -599,6 +611,13 @@ class ScenarioExtractor:
                 })
             if len(workflow) < 3:
                 continue
+            arts: list[str] = []
+            for a in (t.get("expected_artifacts") or []):
+                if not isinstance(a, str):
+                    continue
+                if a.split(":", 1)[0].strip().lower() in REVIEW_ARTIFACT_KINDS:
+                    arts.append(a.strip()[:80])
+            arts = arts[:6]
             points = int(t.get("points") or 15)
             points = max(5, min(50, points))
             priority = (t.get("priority") or "medium").lower()
@@ -614,6 +633,8 @@ class ScenarioExtractor:
                 "points": points,
                 "tools_required": tools,
                 "tool_workflow": workflow,
+                "expected_artifacts": arts,
+                "review_rubric": str(t.get("review_rubric") or "")[:400],
                 "generated": True,
             })
 
@@ -777,6 +798,8 @@ class Materializer:
                 "points": t["points"],
                 "tools_required": t["tools_required"],
                 "tool_workflow": t["tool_workflow"],
+                "expected_artifacts": t.get("expected_artifacts") or [],
+                "review_rubric": t.get("review_rubric") or "",
                 "generated": True,
                 "scenario_id": template.scenario_id,
             })
