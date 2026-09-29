@@ -3678,14 +3678,18 @@ def manager_review_task(task_id: str, verdict: str, feedback: str) -> str:
     if verdict not in ("approved", "needs_rework", "rejected"):
         return "Invalid verdict. Use: approved | needs_rework | rejected."
     # Atomic claim: pending_review → reviewing, so two concurrent review calls
-    # can't both award. A claim older than 10 min is treated as abandoned.
+    # can't both award. A claim older than 10 min is treated as abandoned — the
+    # claim token means a stale reviewer's verdict write can't land on a claim
+    # that was since reclaimed by someone else.
     stale = (datetime.utcnow() - timedelta(minutes=10)).isoformat()
+    claim_id = secrets.token_hex(8)
     claim = tasks_col.update_one(
         {"id": task_id, "simulation_id": sim_id(),
          "$or": [{"review_status": "pending_review"},
                  {"review_status": {"$exists": False}},
                  {"review_status": "reviewing", "review_started_at": {"$lt": stale}}]},
-        {"$set": {"review_status": "reviewing", "review_started_at": datetime.utcnow().isoformat()}},
+        {"$set": {"review_status": "reviewing", "review_started_at": datetime.utcnow().isoformat(),
+                  "review_claim_id": claim_id}},
     )
     if claim.modified_count == 0:
         cur = tasks_col.find_one({"id": task_id, "simulation_id": sim_id()}, {"_id": 0, "review_status": 1})
@@ -3696,30 +3700,43 @@ def manager_review_task(task_id: str, verdict: str, feedback: str) -> str:
         missing = _review_evidence_missing(t)
         if missing:
             tasks_col.update_one(
-                {"id": task_id, "simulation_id": sim_id()},
-                {"$set": {"review_status": "pending_review"}, "$unset": {"review_started_at": ""}})
+                {"id": task_id, "simulation_id": sim_id(), "review_claim_id": claim_id},
+                {"$set": {"review_status": "pending_review"},
+                 "$unset": {"review_started_at": "", "review_claim_id": ""}})
             return ("⛔ APPROVAL BLOCKED by the evidence gate. Missing: " + "; ".join(missing)
                     + ". Check the right surface (get_tool_data / read_email / slack_read). "
                     "If the work genuinely isn't there, use verdict='needs_rework' and say what's missing.")
     base = t["points"]
+    _claim_lost = ("Review claim expired before the verdict landed — "
+                   "call manager_review_task again to retry.")
     if verdict == "approved":
         bonus = _apply_level_weight(int(base * 0.8), "task")
-        tasks_col.update_one({"id": task_id, "simulation_id": sim_id()},
+        landed = tasks_col.update_one(
+            {"id": task_id, "simulation_id": sim_id(), "review_claim_id": claim_id},
             {"$set": {"review_status": "approved"}, "$inc": {"awarded_points": bonus},
-             "$unset": {"review_started_at": ""}})
+             "$unset": {"review_started_at": "", "review_claim_id": ""}})
+        if landed.modified_count == 0:
+            return _claim_lost
         _ack_correct("task_review", f"Re: {t['title']}", feedback, points=bonus)
         return f"✅ Approved. Manager awarded +{bonus}pts satisfaction bonus and emailed feedback."
     elif verdict == "needs_rework":
         rework_pen = _apply_level_weight(-3, "task")
-        tasks_col.update_one({"id": task_id, "simulation_id": sim_id()},
+        landed = tasks_col.update_one(
+            {"id": task_id, "simulation_id": sim_id(), "review_claim_id": claim_id},
             {"$set": {"review_status": "needs_rework", "status": "pending"},
-             "$unset": {"review_started_at": ""}})
+             "$unset": {"review_started_at": "", "review_claim_id": ""}})
+        if landed.modified_count == 0:
+            return _claim_lost
         _flag_mistake("task_rework", f"Re: {t['title']} — please revise", feedback, points=rework_pen)
         return f"↩️ Sent back for rework. {rework_pen:+d}pts and task reopened. User must redo and resubmit."
     elif verdict == "rejected":
         penalty = _apply_level_weight(-max(5, int(base * 0.25)), "task")
-        tasks_col.update_one({"id": task_id, "simulation_id": sim_id()},
-            {"$set": {"review_status": "rejected"}, "$unset": {"review_started_at": ""}})
+        landed = tasks_col.update_one(
+            {"id": task_id, "simulation_id": sim_id(), "review_claim_id": claim_id},
+            {"$set": {"review_status": "rejected"},
+             "$unset": {"review_started_at": "", "review_claim_id": ""}})
+        if landed.modified_count == 0:
+            return _claim_lost
         _flag_mistake("task_reject", f"Re: {t['title']} — rejected", feedback, points=penalty)
         return f"❌ Rejected. {penalty:+d}pts and critical feedback emailed."
     return "Invalid verdict. Use: approved | needs_rework | rejected."
