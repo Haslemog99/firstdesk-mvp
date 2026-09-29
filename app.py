@@ -5768,7 +5768,9 @@ async def chat(req: ChatReq, request: Request, background: BackgroundTasks):
     # like ("human", "...") / ("ai", "...") are accepted directly.
     messages_in = list(history) + [("human", req.message)]
     try:
-        result = orc.invoke({"messages": messages_in}, config=_ls_config("orchestrator"))
+        # orc.invoke is a blocking multi-round LLM call — offload it so the
+        # event loop stays free for other requests during the agent run.
+        result = await asyncio.to_thread(orc.invoke, {"messages": messages_in}, config=_ls_config("orchestrator"))
     except Exception as ex:
         log.exception("chat.invoke_crashed kind=%s", type(ex).__name__)
         kind = type(ex).__name__
@@ -5847,7 +5849,7 @@ async def api_sent():
     return {"sent": items}
 
 @app.post("/api/reply")
-async def api_reply(req: ReplyReq):
+async def api_reply(req: ReplyReq, request: Request, background: BackgroundTasks):
     """Direct email reply — bypasses chat. Marks replied, observes tone, generates an in-character follow-up."""
     if not get_career():
         return {"error": "No career active"}
@@ -5862,19 +5864,32 @@ async def api_reply(req: ReplyReq):
     actions_col.insert_one({"simulation_id": sim_id(), "kind": "email_reply", "email_id": req.email_id,
                             "action": f"reply:{req.email_id}:{req.text[:200]}",
                             "ts": datetime.utcnow().isoformat()})
-    # Tone observer + escalations also apply to email replies
-    observe_tone(req.text)
-    check_escalations()
-    # Compose an in-character follow-up unless it's an info-only sender (e.g. system events) or HR/Director (handled separately)
-    cfg = CAREER_CONFIGS[get_career()]
-    skip_followup = e.get("category") in ("system", "info") or e.get("from_role") in (cfg["hr"]["role"], cfg["director"]["role"])
-    if not skip_followup:
-        sender = {"name": e["from_name"], "role": e.get("from_role", ""), "email": e.get("from_email", "")}
-        body = generate_followup(
-            {"from_name": e["from_name"], "from_role": e.get("from_role", "")},
-            cfg["company"], e["subject"], e.get("body", ""), req.text,
-        )
-        _push_email(sender, f"Re: {e['subject']}", body, priority=e.get("priority", "medium"), category="followup")
+    # Tone observer, escalations and the in-character follow-up are all LLM
+    # calls — run them off the request path so the reply returns immediately.
+    # The follow-up email lands a moment later, like real mail.
+    def _post_reply_llm(msg_: str, e_: dict, sm_: str, sid_: str, career_: Optional[str], uid_: str):
+        _sim_id_var.set(sm_)
+        _session_id_var.set(sid_)
+        _career_var.set(career_)
+        _user_id_var.set(uid_)
+        try:
+            observe_tone(msg_)
+            check_escalations()
+        except Exception:
+            log.exception("reply.observe_failed")
+        cfg = CAREER_CONFIGS[career_]
+        skip = e_.get("category") in ("system", "info") or e_.get("from_role") in (cfg["hr"]["role"], cfg["director"]["role"])
+        if not skip:
+            try:
+                body = generate_followup(
+                    {"from_name": e_["from_name"], "from_role": e_.get("from_role", "")},
+                    cfg["company"], e_["subject"], e_.get("body", ""), msg_,
+                )
+                _push_email({"name": e_["from_name"], "role": e_.get("from_role", ""), "email": e_.get("from_email", "")},
+                            f"Re: {e_['subject']}", body, priority=e_.get("priority", "medium"), category="followup")
+            except Exception:
+                log.exception("reply.followup_failed")
+    background.add_task(_post_reply_llm, req.text, dict(e), sim_id(), session_id(), get_career(), request.state.user["user_id"])
     return {"status": "sent", "email_id": req.email_id}
 
 @app.post("/api/reset")
@@ -9251,7 +9266,8 @@ async def interview_start(req: InterviewStartReq, request: Request):
         )
 
     engine = get_interview_engine()
-    envelope = engine.generate_interview(
+    envelope = await asyncio.to_thread(
+        engine.generate_interview,
         job_description=req.job_description,
         mode=req.mode,
         role_title=req.role_title,
@@ -9300,7 +9316,8 @@ async def interview_answer(req: InterviewAnswerReq, request: Request):
             simulation_id=doc.get("simulation_id") or sim_id(),
         )
 
-    evaluation = engine.evaluate_answer(
+    evaluation = await asyncio.to_thread(
+        engine.evaluate_answer,
         question=question,
         transcript=req.transcript,
         emotion_data=req.emotion_data,
