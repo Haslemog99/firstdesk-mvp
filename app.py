@@ -24,7 +24,7 @@ from urllib.parse import quote
 from fastapi import BackgroundTasks, FastAPI, Header, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, BeforeValidator, Field, field_validator
 from pymongo import MongoClient
@@ -9511,7 +9511,7 @@ def _task_to_slack(p: dict):
 async def no_cache_static(request: Request, call_next):
     resp = await call_next(request)
     p = request.url.path
-    if p == "/" or p.endswith(".html") or p.endswith(".js") or p.endswith(".css"):
+    if p in ("/", "/app") or p.endswith(".html") or p.endswith(".js") or p.endswith(".css"):
         resp.headers["Cache-Control"] = "no-store, must-revalidate"
         resp.headers["Pragma"] = "no-cache"
     return resp
@@ -9855,6 +9855,14 @@ async def interview_voice_ws(ws: WebSocket):
         except Exception:
             pass
 
+
+@app.get("/", include_in_schema=False)
+async def _landing():
+    return FileResponse("static/landing.html")
+
+@app.get("/app", include_in_schema=False)
+async def _app_entry():
+    return FileResponse("static/index.html")
 
 app.mount("/", StaticFiles(directory="static", html=True), name="static")
 
