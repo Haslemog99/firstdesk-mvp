@@ -1,0 +1,406 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>FirstDesk AI — Do the job before you're hired to do it</title>
+<meta name="description" content="FirstDesk is a simulated company in your browser. Get a desk, a manager, and a week of real work across 8 career tracks. Every review checks the work you actually produced.">
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='7' fill='%232563EB'/><text x='50%25' y='55%25' font-family='Inter,Arial' font-weight='700' font-size='17' fill='white' text-anchor='middle' dominant-baseline='middle'>F</text></svg>">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Instrument+Serif:ital@0;1&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#0a0a0c; --bg2:#101013; --card:#131316; --line:rgba(255,255,255,0.07);
+  --txt:#fafaf9; --sub:#a1a1aa; --dim:#71717a; --faint:#52525b;
+  --blue:#2563EB; --blue-l:#60a5fa; --serif:'Instrument Serif',Georgia,serif;
+}
+*{margin:0;padding:0;box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{background:var(--bg);color:var(--txt);font-family:Inter,system-ui,-apple-system,sans-serif;-webkit-font-smoothing:antialiased;letter-spacing:-0.005em;line-height:1.6}
+a{color:inherit;text-decoration:none}
+.wrap{max-width:1120px;margin:0 auto;padding:0 24px}
+.serif{font-family:var(--serif);font-style:italic;font-weight:400;letter-spacing:-0.015em}
+.eyebrow{display:inline-flex;align-items:center;gap:8px;font-size:12px;font-weight:600;color:var(--blue-l);border:1px solid rgba(96,165,250,0.25);background:rgba(37,99,235,0.08);border-radius:999px;padding:5px 14px;margin-bottom:22px;letter-spacing:0.02em}
+.eyebrow::before{content:'';width:6px;height:6px;border-radius:50%;background:var(--blue-l)}
+
+/* ── nav ── */
+nav{position:sticky;top:0;z-index:50;background:rgba(10,10,12,0.82);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);border-bottom:1px solid var(--line)}
+nav .wrap{display:flex;align-items:center;height:64px;gap:32px}
+.brand{display:flex;align-items:center;gap:10px;font-weight:700;font-size:15px}
+.brand svg{border-radius:7px}
+.navlinks{display:flex;gap:26px;margin-left:auto;align-items:center}
+.navlinks a{font-size:13px;color:var(--sub);transition:color .15s}
+.navlinks a:hover{color:var(--txt)}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;font-weight:600;font-size:14px;border-radius:9px;padding:10px 20px;transition:transform .12s,box-shadow .12s,background .12s;cursor:pointer;border:none;font-family:inherit}
+.btn:hover{transform:translateY(-1px)}
+.btn-primary{background:var(--blue);color:#fff;box-shadow:0 0 0 1px rgba(96,165,250,0.3),0 8px 24px rgba(37,99,235,0.25)}
+.btn-primary:hover{background:#1d4fd7}
+.btn-ghost{background:rgba(255,255,255,0.04);color:var(--txt);border:1px solid var(--line)}
+.btn-ghost:hover{background:rgba(255,255,255,0.07)}
+.btn-sm{padding:8px 16px;font-size:13px}
+
+/* ── hero ── */
+.hero{padding:110px 0 80px;text-align:center;position:relative;overflow:hidden}
+.hero::before{content:'';position:absolute;top:-260px;left:50%;transform:translateX(-50%);width:900px;height:520px;background:radial-gradient(ellipse,rgba(37,99,235,0.14),transparent 65%);pointer-events:none}
+.hero h1{font-family:var(--serif);font-style:italic;font-weight:400;font-size:clamp(44px,6.5vw,76px);line-height:1.02;letter-spacing:-0.02em;margin-bottom:24px;position:relative}
+.hero h1 em{color:var(--blue-l);font-style:italic}
+.hero p.lede{max-width:600px;margin:0 auto 36px;font-size:17px;color:var(--sub);line-height:1.65;position:relative}
+.hero-cta{display:flex;gap:14px;justify-content:center;position:relative;flex-wrap:wrap}
+.hero-note{margin-top:22px;font-size:12.5px;color:var(--faint)}
+.stats{display:flex;justify-content:center;gap:56px;margin-top:64px;flex-wrap:wrap;position:relative}
+.stat b{display:block;font-family:var(--serif);font-style:italic;font-weight:400;font-size:34px;color:var(--txt)}
+.stat span{font-size:12.5px;color:var(--dim)}
+
+/* ── sections ── */
+section{padding:96px 0}
+.sec-head{max-width:640px;margin-bottom:56px}
+.sec-head.center{margin-left:auto;margin-right:auto;text-align:center}
+.sec-head h2{font-family:var(--serif);font-style:italic;font-weight:400;font-size:clamp(32px,4.5vw,48px);line-height:1.08;letter-spacing:-0.015em;margin-bottom:16px}
+.sec-head p{color:var(--sub);font-size:15.5px}
+.rule{border-top:1px solid var(--line)}
+
+/* problem */
+.problem{max-width:680px;margin:0 auto;text-align:center}
+.problem h2{font-family:var(--serif);font-style:italic;font-weight:400;font-size:clamp(30px,4vw,44px);line-height:1.12;margin-bottom:24px}
+.problem p{color:var(--sub);font-size:16px;margin-bottom:16px}
+.problem p b{color:var(--txt);font-weight:600}
+
+.grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:18px}
+.grid2{display:grid;grid-template-columns:repeat(2,1fr);gap:18px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:28px;transition:border-color .15s,transform .15s}
+.card:hover{border-color:rgba(255,255,255,0.14);transform:translateY(-2px)}
+.card .ico{width:38px;height:38px;border-radius:9px;background:rgba(37,99,235,0.12);border:1px solid rgba(96,165,250,0.2);display:flex;align-items:center;justify-content:center;margin-bottom:18px;color:var(--blue-l)}
+.card h3{font-size:16px;font-weight:600;margin-bottom:8px}
+.card p{font-size:13.5px;color:var(--sub);line-height:1.6}
+.card p em{color:var(--dim);font-style:italic;display:block;margin-top:8px}
+
+/* steps */
+.steps{display:grid;grid-template-columns:repeat(4,1fr);gap:18px;counter-reset:step}
+.step{padding:26px 22px;border:1px solid var(--line);border-radius:14px;background:var(--bg2);position:relative}
+.step::before{counter-increment:step;content:'0' counter(step);font-family:var(--serif);font-style:italic;font-size:30px;color:var(--blue-l);display:block;margin-bottom:14px}
+.step h3{font-size:15px;font-weight:600;margin-bottom:6px}
+.step p{font-size:13px;color:var(--sub)}
+
+/* personas */
+.persona{border:1px solid var(--line);border-radius:14px;padding:26px;background:var(--card)}
+.persona .who{font-size:11.5px;font-weight:700;letter-spacing:0.06em;color:var(--blue-l);text-transform:uppercase;margin-bottom:10px}
+.persona h3{font-size:16px;font-weight:600;margin-bottom:8px}
+.persona p{font-size:13.5px;color:var(--sub)}
+
+/* careers */
+.careers{display:grid;grid-template-columns:repeat(4,1fr);gap:14px}
+.career{border:1px solid var(--line);border-radius:12px;padding:20px;background:var(--card);transition:border-color .15s}
+.career:hover{border-color:rgba(96,165,250,0.4)}
+.career .role{font-size:14px;font-weight:600;margin-bottom:3px}
+.career .co{font-size:12px;color:var(--dim)}
+.career .tag{display:inline-block;margin-top:12px;font-size:11px;color:var(--blue-l);background:rgba(37,99,235,0.08);border-radius:6px;padding:3px 8px}
+
+/* window mock */
+.mockcap{max-width:640px;margin:0 auto 36px;text-align:center}
+.mockcap p{font-family:var(--serif);font-style:italic;font-size:clamp(24px,3.2vw,34px);line-height:1.15;color:var(--txt)}
+.mockcap span{display:block;margin-top:10px;font-family:Inter,sans-serif;font-style:normal;font-size:13.5px;color:var(--dim)}
+.mock{border:1px solid var(--line);border-radius:14px;overflow:hidden;background:var(--bg2);box-shadow:0 30px 80px rgba(0,0,0,0.5)}
+.mock-bar{display:flex;align-items:center;gap:8px;padding:10px 14px;border-bottom:1px solid var(--line);background:#17171a}
+.mock-bar i{width:11px;height:11px;border-radius:2px;border:1px solid rgba(255,255,255,0.25)}
+.mock-bar span{margin-left:auto;font-size:11px;color:var(--faint)}
+.mock-body{display:grid;grid-template-columns:190px 1fr;min-height:300px}
+.mock-side{border-right:1px solid var(--line);padding:16px;font-size:12px;color:var(--dim)}
+.mock-side div{padding:7px 10px;border-radius:7px;margin-bottom:2px}
+.mock-side .on{background:rgba(37,99,235,0.12);color:var(--blue-l)}
+.mock-main{padding:22px;display:flex;flex-direction:column;gap:14px}
+.msg{display:flex;gap:12px}
+.msg .av{width:32px;height:32px;border-radius:8px;flex:none;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;color:#fff}
+.msg .bub{background:rgba(255,255,255,0.03);border:1px solid var(--line);border-radius:10px;padding:12px 16px;font-size:13px;color:var(--sub);max-width:520px}
+.msg .bub b{color:var(--txt);display:block;font-size:12px;margin-bottom:4px}
+.msg .bub .verdict{margin-top:8px;display:inline-block;font-size:11px;font-weight:600;padding:3px 10px;border-radius:6px;background:rgba(34,197,94,0.12);color:#4ade80}
+.msg .bub .verdict.rework{background:rgba(234,179,8,0.12);color:#fbbf24}
+
+/* pricing */
+.pricing{display:grid;grid-template-columns:repeat(2,minmax(0,420px));gap:18px;justify-content:center}
+.price-card{border:1px solid var(--line);border-radius:16px;padding:34px;background:var(--card)}
+.price-card.pro{border-color:rgba(96,165,250,0.35);background:linear-gradient(180deg,rgba(37,99,235,0.07),var(--card))}
+.price-card h3{font-size:15px;font-weight:600;margin-bottom:4px}
+.price-card .amt{font-family:var(--serif);font-style:italic;font-size:42px;margin:14px 0 4px}
+.price-card .amt small{font-size:15px;color:var(--dim);font-family:Inter,sans-serif;font-style:normal}
+.price-card .pd{font-size:12.5px;color:var(--dim);margin-bottom:22px}
+.price-card ul{list-style:none;margin-bottom:28px}
+.price-card li{font-size:13.5px;color:var(--sub);padding:7px 0 7px 24px;position:relative;border-bottom:1px solid rgba(255,255,255,0.04)}
+.price-card li::before{content:'✓';position:absolute;left:0;color:var(--blue-l);font-weight:700}
+.badge-pro{display:inline-block;font-size:10.5px;font-weight:700;letter-spacing:0.06em;color:var(--blue-l);background:rgba(37,99,235,0.12);border-radius:5px;padding:3px 8px;vertical-align:middle;margin-left:8px}
+
+/* faq */
+.faq{max-width:720px;margin:0 auto}
+.faq details{border-bottom:1px solid var(--line);padding:20px 0}
+.faq summary{cursor:pointer;font-size:15px;font-weight:600;list-style:none;display:flex;justify-content:space-between;align-items:center}
+.faq summary::after{content:'+';color:var(--dim);font-size:18px;font-weight:400}
+.faq details[open] summary::after{content:'−'}
+.faq details p{margin-top:12px;font-size:13.5px;color:var(--sub)}
+
+/* cta band */
+.cta-band{text-align:center;padding:110px 0;border-top:1px solid var(--line);position:relative;overflow:hidden}
+.cta-band::before{content:'';position:absolute;bottom:-300px;left:50%;transform:translateX(-50%);width:800px;height:480px;background:radial-gradient(ellipse,rgba(37,99,235,0.12),transparent 65%);pointer-events:none}
+.cta-band h2{font-family:var(--serif);font-style:italic;font-weight:400;font-size:clamp(36px,5vw,56px);margin-bottom:16px;position:relative}
+.cta-band p{color:var(--sub);margin-bottom:32px;position:relative}
+.cta-band .hero-note{margin-top:18px}
+
+footer{border-top:1px solid var(--line);padding:36px 0 48px}
+footer .wrap{display:flex;align-items:center;gap:28px;flex-wrap:wrap}
+footer .fnote{font-size:12px;color:var(--faint);margin-left:auto}
+footer a{font-size:12.5px;color:var(--dim)}
+footer a:hover{color:var(--txt)}
+
+@media(max-width:900px){
+  .grid3,.steps{grid-template-columns:1fr 1fr}
+  .careers{grid-template-columns:1fr 1fr}
+  .mock-body{grid-template-columns:1fr}
+  .mock-side{display:flex;gap:4px;overflow-x:auto;border-right:none;border-bottom:1px solid var(--line)}
+}
+@media(max-width:620px){
+  .grid3,.grid2,.steps,.careers,.pricing{grid-template-columns:1fr}
+  .navlinks a:not(.btn):not(.keep){display:none}
+  .stats{gap:32px}
+  .hero{padding:80px 0 60px}
+}
+</style>
+</head>
+<body>
+
+<nav>
+  <div class="wrap">
+    <a class="brand" href="/">
+      <svg width="24" height="24" viewBox="0 0 32 32"><rect width="32" height="32" rx="7" fill="#2563EB"/><text x="50%" y="55%" font-family="Inter,Arial" font-weight="700" font-size="17" fill="white" text-anchor="middle" dominant-baseline="middle">F</text></svg>
+      FirstDesk&nbsp;AI
+    </a>
+    <div class="navlinks">
+      <a href="#product">The sim</a>
+      <a href="#how">How it works</a>
+      <a href="#careers">Careers</a>
+      <a href="#pricing">Pricing</a>
+      <a href="#faq">FAQ</a>
+      <a class="keep" href="/app">Sign in</a>
+      <a class="btn btn-primary btn-sm" href="/app">Start your first day free</a>
+    </div>
+  </div>
+</nav>
+
+<header class="hero">
+  <div class="wrap">
+    <div class="eyebrow">The workplace simulator</div>
+    <h1>Do the job<br><em>before you're hired to do it.</em></h1>
+    <p class="lede">FirstDesk is a simulated company that runs in your browser. You get a desk, a manager, and a week of real work. Every review checks the artifacts you actually produced.</p>
+    <div class="hero-cta">
+      <a class="btn btn-primary" href="/app">Start your first day free</a>
+      <a class="btn btn-ghost" href="#product">See a Tuesday inside</a>
+    </div>
+    <div class="hero-note">Free to start. Runs in your browser. Guest mode needs no account.</div>
+    <div class="stats">
+      <div class="stat"><b>8</b><span>career tracks, or paste the job ad you're chasing</span></div>
+      <div class="stat"><b>5</b><span>simulated days of work per run</span></div>
+      <div class="stat"><b>6</b><span>AI colleagues with their own agendas</span></div>
+      <div class="stat"><b>100%</b><span>of reviews checked against real evidence</span></div>
+    </div>
+  </div>
+</header>
+
+<section class="rule">
+  <div class="wrap">
+    <div class="problem">
+      <h2>The catch-22 every junior knows.</h2>
+      <p>Every posting asks for experience. You can't get experience without the job. So you collect certificates, and employers still can't tell whether you can do the work.</p>
+      <p><b>FirstDesk breaks the loop.</b> You do the actual work of the role inside a simulated company, and the work itself becomes the proof.</p>
+    </div>
+  </div>
+</section>
+
+<section id="product" class="rule" style="padding-top:80px">
+  <div class="wrap">
+    <div class="mockcap">
+      <p>A Tuesday inside FirstDesk.</p>
+      <span>Your manager approved the reconciliation because the three flagged entries are in the ledger. The teammate's suggestion is wrong on purpose. The client is two days into being ignored.</span>
+    </div>
+    <div class="mock">
+      <div class="mock-bar"><i></i><i></i><i></i><span>Outlook — Apex Financial Ltd</span></div>
+      <div class="mock-body">
+        <div class="mock-side">
+          <div class="on">Inbox</div><div>Sent</div><div>Team chat</div><div>Tasks</div><div>Files</div><div>Calendar</div>
+        </div>
+        <div class="mock-main">
+          <div class="msg"><div class="av" style="background:#2563EB">SM</div><div class="bub"><b>Sarah Mitchell · Finance Manager</b>Good work on the reconciliation — I can see the three missing entries you flagged.<span class="verdict">APPROVED +20 pts</span></div></div>
+          <div class="msg"><div class="av" style="background:#7c3aed">DC</div><div class="bub"><b>David Chen · Senior Accountant</b>Sure about that journal? I'd have posted it to 5001, not 5005. (He's wrong — check the ledger before you agree.)</div></div>
+          <div class="msg"><div class="av" style="background:#b45309">JC</div><div class="bub"><b>James Crawford · Client</b>Still waiting on the adjusted invoice. It's been two days — chasing now.<span class="verdict rework">ESCALATED</span></div></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="how" class="rule">
+  <div class="wrap">
+    <div class="sec-head center">
+      <h2>Pick a desk. Work the week. Walk in with proof.</h2>
+    </div>
+    <div class="steps">
+      <div class="step"><h3>Pick a desk</h3><p>Choose from 8 role tracks, or paste the job ad you're applying for and get a simulation built around it.</p></div>
+      <div class="step"><h3>Work the days</h3><p>Emails, tickets, ledgers, standups. The tools each role really uses, with deadlines that bite.</p></div>
+      <div class="step"><h3>Get reviewed</h3><p>Your manager checks the artifacts you produced, then approves, sends it back, or rejects it. With reasons.</p></div>
+      <div class="step"><h3>Sit the interview</h3><p>A voice AI interviews you on the work you just did. You finish with a score backed by graded output.</p></div>
+    </div>
+  </div>
+</section>
+
+<section class="rule">
+  <div class="wrap">
+    <div class="sec-head">
+      <h2>The parts that make it a job</h2>
+      <p>There's no answer key, because the work either got done or it didn't. What you get is the people, the deadlines, and the consequences.</p>
+    </div>
+    <div class="grid3">
+      <div class="card">
+        <div class="ico"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg></div>
+        <h3>Reviews check the evidence</h3>
+        <p>Your manager can't approve work that doesn't exist. An "approved" means the email was sent, the ledger was fixed, the ticket was closed.</p>
+      </div>
+      <div class="card">
+        <div class="ico"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></svg></div>
+        <h3>Colleagues with their own agenda</h3>
+        <p>A teammate who's sometimes wrong on purpose. A client who escalates when ignored. HR who reads your tone. They remember what you did.</p>
+      </div>
+      <div class="card">
+        <div class="ico"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></svg></div>
+        <h3>The tools the job actually uses</h3>
+        <p>Outlook, team chat, Jira-style boards, ledgers, a SIEM with live EDR telemetry. Each career gets the stack a real junior would inherit.</p>
+      </div>
+      <div class="card">
+        <div class="ico"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2a10 10 0 1 0 10 10"/><path d="M12 6v6l4 2"/><circle cx="19" cy="5" r="3"/></svg></div>
+        <h3>A company that reacts</h3>
+        <p>Leave the client unread and your manager hears about it. Skip a control and it surfaces in the audit. The sim keeps score of what you didn't do too.</p>
+      </div>
+      <div class="card">
+        <div class="ico"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2M12 19v4"/></svg></div>
+        <h3>Interviews that hear you</h3>
+        <p>Voice AI interviews scored on your answers and your delivery. Combo mode walks you from the desk straight into the interview chair.</p>
+      </div>
+      <div class="card">
+        <div class="ico"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6M16 13H8M16 17H8M10 9H8"/></svg></div>
+        <h3>Built around the job you want</h3>
+        <p>Paste a real posting and the engine builds a company around it: the colleagues, the tasks, the rubric your work gets graded on.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="rule">
+  <div class="wrap">
+    <div class="sec-head">
+      <h2>Built for three kinds of visitor</h2>
+    </div>
+    <div class="grid3">
+      <div class="persona">
+        <div class="who">First job</div>
+        <h3>Never had the title</h3>
+        <p>Graduate or self-taught, the CV can't prove what you haven't done. A week of graded work in the role can.</p>
+      </div>
+      <div class="persona">
+        <div class="who">Switching careers</div>
+        <h3>Proving it sideways</h3>
+        <p>You know you can do the job. The hiring manager doesn't. Do a simulated week of their work and bring the receipts.</p>
+      </div>
+      <div class="persona">
+        <div class="who">Hiring &amp; L&amp;D teams</div>
+        <h3>Assess on real work</h3>
+        <p>Screen candidates on what they produce inside the sim instead of what they claim on a CV. Same desk, same tasks, comparable scores.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="careers" class="rule">
+  <div class="wrap">
+    <div class="sec-head">
+      <h2>Eight desks. Pick one.</h2>
+      <p>Each track is a full company with its own manager, tools, and deadlines. Or skip the list and paste a job ad.</p>
+    </div>
+    <div class="careers">
+      <a class="career" href="/app"><div class="role">Junior Accountant</div><div class="co">Apex Financial Ltd</div><span class="tag">Finance</span></a>
+      <a class="career" href="/app"><div class="role">Cybersecurity Analyst</div><div class="co">ShieldWall Security</div><span class="tag">Security</span></a>
+      <a class="career" href="/app"><div class="role">Marketing Coordinator</div><div class="co">BrightPath Agency</div><span class="tag">Marketing</span></a>
+      <a class="career" href="/app"><div class="role">Software Developer</div><div class="co">CodeCraft Labs</div><span class="tag">Engineering</span></a>
+      <a class="career" href="/app"><div class="role">IT Procurement Specialist</div><div class="co">TechStack Procurement</div><span class="tag">Operations</span></a>
+      <a class="career" href="/app"><div class="role">L&amp;D Specialist</div><div class="co">Helix People Co.</div><span class="tag">HR</span></a>
+      <a class="career" href="/app"><div class="role">Growth Product Manager</div><div class="co">Northwind Cloud</div><span class="tag">Product</span></a>
+      <a class="career" href="/app"><div class="role">GRC Analyst</div><div class="co">Halcyon Health</div><span class="tag">Compliance</span></a>
+    </div>
+  </div>
+</section>
+
+<section id="pricing" class="rule">
+  <div class="wrap">
+    <div class="sec-head center">
+      <h2>Start free. Upgrade when the interview matters.</h2>
+    </div>
+    <div class="pricing">
+      <div class="price-card">
+        <h3>Free</h3>
+        <div class="amt">£0<small>/mo</small></div>
+        <div class="pd">The whole workplace. Every desk.</div>
+        <ul>
+          <li>Full workplace simulation, all 8 career tracks</li>
+          <li>Manager reviews checked against real evidence</li>
+          <li>Multi-day progression and workplace physics</li>
+          <li>Employability score built from graded work</li>
+        </ul>
+        <a class="btn btn-ghost" style="width:100%" href="/app">Start free</a>
+      </div>
+      <div class="price-card pro">
+        <h3>Pro <span class="badge-pro">RECOMMENDED</span></h3>
+        <div class="amt">Paid<small> · upgrade in-app</small></div>
+        <div class="pd">For candidates who want the full loop, sim into interview.</div>
+        <ul>
+          <li>Everything in Free</li>
+          <li>Voice mock interviews with delivery scoring</li>
+          <li>Combo mode: the sim flows into your interview</li>
+          <li>Interview feedback and scoring history</li>
+        </ul>
+        <a class="btn btn-primary" style="width:100%" href="/app">Get Pro</a>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="faq" class="rule">
+  <div class="wrap">
+    <div class="sec-head center"><h2>Questions</h2></div>
+    <div class="faq">
+      <details><summary>Is this a course or a quiz?</summary><p>It's a job. You work inside the tools the role uses, and a manager grades the output. There's nothing to watch and nothing to memorise.</p></details>
+      <details><summary>Do I need an account to try it?</summary><p>Guest mode starts a simulation straight from the browser. Make an account when you want your score and progress to stick.</p></details>
+      <details><summary>Can it simulate the exact job I'm applying for?</summary><p>Paste the job description and the engine builds a simulation around it: the company, the colleagues, the tasks, and the rubric your work gets graded on.</p></details>
+      <details><summary>What does the employability score measure?</summary><p>Approved tasks, review outcomes, and interview results. Every point traces back to work the system checked.</p></details>
+      <details><summary>Will employers take the score seriously?</summary><p>It carries more than a certificate because there's a trail of graded work behind it. You can walk an interviewer through what you did, day by day. It won't replace experience, and it isn't meant to.</p></details>
+      <details><summary>I'm switching careers. Which desk do I pick?</summary><p>Pick the track closest to the role you're targeting. If you already have the job ad, paste it and skip the catalogue entirely.</p></details>
+    </div>
+  </div>
+</section>
+
+<section class="cta-band">
+  <div class="wrap">
+    <h2>Your first day starts now.</h2>
+    <p>Pick a desk and do the work. Guest mode needs no account.</p>
+    <a class="btn btn-primary" href="/app">Start your first day free</a>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <a class="brand" href="/" style="font-size:14px">
+      <svg width="20" height="20" viewBox="0 0 32 32"><rect width="32" height="32" rx="7" fill="#2563EB"/><text x="50%" y="55%" font-family="Inter,Arial" font-weight="700" font-size="17" fill="white" text-anchor="middle" dominant-baseline="middle">F</text></svg>
+      FirstDesk AI
+    </a>
+    <a href="/app">Sign in</a>
+    <a href="/interview.html">Interview practice</a>
+    <span class="fnote">© 2026 FirstDesk AI</span>
+  </div>
+</footer>
+
+</body>
+</html>

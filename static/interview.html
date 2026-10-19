@@ -235,7 +235,7 @@ async function api(path, opts){
   if(t) opts.headers['Authorization']='Bearer '+t;
   const r=await fetch(path, opts);
   if(r.status===401){
-    location.href='/?next=/interview.html';
+    location.href='/app?next=/interview.html';
     throw new Error('unauthorized');
   }
   const d=await r.json().catch(()=>({}));
@@ -844,7 +844,7 @@ updateLiveCounter = function(){
 // On load: if no token, send to login.
 (function init(){
   if(!localStorage.getItem(TKEY)){
-    location.href='/?next=/interview.html';
+    location.href='/app?next=/interview.html';
     return;
   }
   // Restore mute state from prior session

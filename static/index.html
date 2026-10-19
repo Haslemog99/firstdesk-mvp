@@ -1561,7 +1561,7 @@ const _PAID_PLANS=['pro','premium','team','enterprise'];
 function _isPaidUser(){return !!(currentUser&&currentUser.plan&&_PAID_PLANS.indexOf(currentUser.plan)>=0)}
 function openPaywall(){const m=document.getElementById('paywall');if(m)m.classList.add('on')}
 function closePaywall(){const m=document.getElementById('paywall');if(m)m.classList.remove('on')}
-function goUpgrade(){window.location.href='/pricing.html'}
+function goUpgrade(){window.location.href='/#pricing'}
 function _syncPaidUI(){const paid=_isPaidUser();document.querySelectorAll('.path-card[data-paid="1"]').forEach(c=>{const badge=c.querySelector('.path-pro');if(paid){c.classList.remove('locked');if(badge)badge.style.display='none'}else{c.classList.add('locked');if(badge)badge.style.display='inline-block'}})}
 function choosePath(p){const ch=document.getElementById('pathChooser');const st=document.getElementById('simStage');const pill=document.getElementById('simModePill');if((p==='interview'||p==='combo')&&!_isPaidUser()){openPaywall();return}if(p==='interview'){window.location.href='/interview.html';return}if(p==='combo'){try{localStorage.setItem('fdComboMode','1')}catch(e){}pill.textContent='Combo · interview will follow';pill.style.display='inline-flex'}else{try{localStorage.removeItem('fdComboMode')}catch(e){}pill.style.display='none'}ch.style.display='none';st.style.display='block';window.scrollTo(0,0)}
 function backToChooser(){const ch=document.getElementById('pathChooser');const st=document.getElementById('simStage');if(ch)ch.style.display='block';if(st)st.style.display='none';try{localStorage.removeItem('fdComboMode')}catch(e){}window.scrollTo(0,0)}
