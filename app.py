@@ -297,13 +297,16 @@ def _async_lock(registry: dict, key: str) -> asyncio.Lock:
 
 def _evict_if_full(d: dict, limit: int = _USER_CACHE_LIMIT) -> None:
     if len(d) > limit:
-        # Drop oldest insertion-order entry (Python 3.7+ dicts preserve order).
-        try:
-            oldest = next(iter(d))
-            d.pop(oldest, None)
-            log.info("cache.evict key=%s remaining=%d", oldest, len(d))
-        except StopIteration:
-            pass
+        # Drop the oldest insertion-order entry (Python 3.7+ dicts preserve
+        # order), skipping held locks: evicting one would hand the next request
+        # a fresh, unlocked lock and break the per-user guards.
+        for key in list(d):
+            v = d[key]
+            if isinstance(v, asyncio.Lock) and v.locked():
+                continue
+            d.pop(key, None)
+            log.info("cache.evict key=%s remaining=%d", key, len(d))
+            return
 
 def get_orchestrator():
     uid = _user_id_var.get()
@@ -329,6 +332,12 @@ def _load_chat_history_from_db(sid: str) -> list:
         q: dict = {"session_id": sid, "role": {"$in": ["human", "ai"]}}
         if marker:
             q["_id"] = {"$gt": marker["_id"]}
+        # Turns written before this deploy have no reset marker, and clear_sim
+        # never deleted them (they carry session_id, not simulation_id). Bound by
+        # the current sim's start too, so an old sim's chat can't leak in.
+        sess = sessions_col.find_one({"session_id": sid}, {"_id": 0, "started_at": 1}) or {}
+        if sess.get("started_at"):
+            q["ts"] = {"$gte": sess["started_at"]}
         rows = list(memory_col.find(q, {"_id": 0, "role": 1, "content": 1})
                     .sort("_id", -1).limit(_CHAT_HISTORY_MAX))
         return [(r["role"], r.get("content") or "") for r in reversed(rows)]
@@ -5910,7 +5919,7 @@ _USER_DATA_COLS_BY_SIM_ID = (
 )
 # sessions_col stores its sim handle under the field `sim_id`, not `simulation_id`,
 # and its primary key is session_id. Deleted separately by session_id.
-_USER_DATA_COLS_BY_SESSION_ID = ("sessions_col",)
+_USER_DATA_COLS_BY_SESSION_ID = ("sessions_col", "memory_col")  # chat turns carry session_id only
 
 class TrackReq(BaseModel):
     kind: str = Field(..., pattern=r"^(tool_switch|email_open|idle|focus_blur|custom)$", max_length=32)
@@ -6039,7 +6048,8 @@ async def auth_delete_account(authorization: Optional[str] = Header(None)):
     # Per-process caches keyed by user_id.
     _user_orchestrators.pop(uid, None)
     _user_chat_history.pop(uid, None)
-    _user_locks.pop(uid, None)
+    for k in (uid, f"{uid}:jd", f"{uid}:meeting"):
+        _user_locks.pop(k, None)
     users_col.delete_one({"user_id": uid})
     _invalidate_user_cache(uid)
     log.info("auth.account_deleted user=%s totals=%s", uid, deleted)

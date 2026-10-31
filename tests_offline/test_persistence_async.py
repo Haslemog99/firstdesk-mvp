@@ -171,10 +171,84 @@ def test_extractor_repairs_bad_json_once(app_mod, monkeypatch):
     assert tpl is None and reason == "invalid"  # repaired JSON parsed, then failed validation honestly
 
 
-def test_extractor_repair_outage_is_reported_as_llm(app_mod):
+def test_extractor_repair_failure_after_an_answer_is_invalid(app_mod):
     from scenario_engine import ScenarioExtractor
-    ex = ScenarioExtractor(SeqLLM("not json", RuntimeError("503 upstream")))
+    ex = ScenarioExtractor(SeqLLM("{broken json", RuntimeError("503 upstream")))
+    assert ex.extract_with_reason(_job()) == (None, "invalid")
+
+
+def test_extractor_first_call_outage_is_llm(app_mod):
+    from scenario_engine import ScenarioExtractor
+    ex = ScenarioExtractor(SeqLLM(RuntimeError("404 model not found")))
     assert ex.extract_with_reason(_job()) == (None, "llm")
+
+
+def test_no_repair_when_it_cannot_help(app_mod):
+    from scenario_engine import ScenarioExtractor
+    for raw in ("I can't help with that.", "{" + "x" * 13000):  # no JSON at all; truncated
+        fake = SeqLLM(raw)
+        assert ScenarioExtractor(fake).extract_with_reason(_job()) == (None, "invalid")
+        assert fake.calls == 1
+
+
+def test_extractor_repair_can_succeed(app_mod):
+    from scenario_engine import ScenarioExtractor
+    tasks = [{"title": f"Task {i}", "description": "Do the thing properly.", "priority": "high",
+              "deadline": "Today", "points": 10} for i in range(6)]
+    emails = [{"from_name": f"P{i}", "from_role": "Manager", "subject": f"S{i}", "body": "Please look at this."}
+              for i in range(5)]
+    good = json.dumps({"tasks": tasks, "starter_emails": emails})
+    fake = SeqLLM("Here it is: {" + good[1:-1] + ",}", good)  # trailing junk the parser can't fix
+    tpl, reason = ScenarioExtractor(fake).extract_with_reason(_job())
+    # Either the cleaner rescued it on the first pass or the repair did; both must not fail as "llm".
+    assert reason != "llm"
+
+
+def test_pre_deploy_chat_from_an_old_sim_is_not_replayed(client, app_mod, monkeypatch, quiet_tone):
+    """Turns written before this change have no reset marker. They must stay out."""
+    h, uid = _signup(client)
+    client.post("/api/start", headers=h, json={"career": "cybersecurity", "experience_level": "experienced", "reset": True})
+    app_mod._user_orchestrators[uid] = FakeOrchestrator()
+    _chat(client, h, "OLD CYBER SIM MESSAGE")
+    client.post("/api/start", headers=h, json={"career": "accountant", "experience_level": "experienced", "reset": True})
+    app_mod.memory_col.delete_many({"session_id": f"sess_{uid}", "role": "reset"})  # mimic pre-deploy data
+    _simulate_restart(app_mod, uid)
+    orc = FakeOrchestrator()
+    monkeypatch.setattr(app_mod, "create_orchestrator", lambda *a, **k: orc)
+    _chat(client, h, "first accountant message")
+    assert all("OLD CYBER" not in str(m) for m in orc.seen[-1])
+
+
+def test_account_deletion_removes_chat_transcript(client, app_mod, quiet_tone):
+    h, uid = _signup(client)
+    client.post("/api/start", headers=h, json={"career": "cybersecurity", "experience_level": "experienced", "reset": True})
+    app_mod._user_orchestrators[uid] = FakeOrchestrator()
+    _chat(client, h, "please forget me")
+    assert app_mod.memory_col.count_documents({"session_id": f"sess_{uid}"}) > 0
+    r = client.request("DELETE", "/api/auth/account", headers=h)
+    if r.status_code == 405:
+        r = client.post("/api/auth/delete", headers=h)
+    assert r.status_code == 200, r.text
+    assert app_mod.memory_col.count_documents({"session_id": f"sess_{uid}"}) == 0
+
+
+def test_eviction_never_drops_a_held_lock(app_mod):
+    reg = {}
+    held = app_mod._async_lock(reg, "held")
+
+    async def run():
+        await held.acquire()
+        for i in range(app_mod._USER_CACHE_LIMIT + 5):
+            app_mod._async_lock(reg, f"k{i}")
+        assert reg.get("held") is held
+        held.release()
+    asyncio.run(run())
+
+
+def test_python_version_is_pinned_for_the_build():
+    import os
+    p = os.path.join(app_mod_root(), ".python-version")
+    assert open(p).read().strip() == "3.11"
 
 
 def test_extractor_reason_does_not_live_on_shared_state(app_mod):

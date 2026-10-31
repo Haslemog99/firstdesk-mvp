@@ -573,19 +573,24 @@ class ScenarioExtractor:
             return None, "llm"
         envelope = self._parse_envelope(raw)
         if envelope is None:
-            # One repair attempt: hand the model its own output and ask for the
-            # JSON alone. Costs a call only when the first answer was unusable.
             log.warning("extractor.parse_failed ext_id=%s preview=%r", job.ext_id, raw[:200] if raw else "")
+            # One repair attempt, only when it can help: the model tried to emit
+            # JSON (there's a "{") and the output is short enough that it wasn't
+            # cut off at the token limit (a repair would just be cut off again).
+            if not raw or "{" not in raw or len(raw) > 12000:
+                return None, "invalid"
             try:
                 fix = self.llm.invoke([
                     ("system", "You repair malformed JSON. Return only the corrected JSON object, "
                                "with no commentary and no code fences."),
-                    ("human", (raw or "")[:12000]),
+                    ("human", raw),
                 ])
                 envelope = self._parse_envelope(fix.content if hasattr(fix, "content") else str(fix))
             except Exception as ex:
-                log.error("extractor.repair_failed ext_id=%s kind=%s", job.ext_id, type(ex).__name__)
-                return None, "llm"
+                # The provider answered the first call, so treat this like an
+                # unusable answer rather than an outage.
+                log.warning("extractor.repair_failed ext_id=%s kind=%s", job.ext_id, type(ex).__name__)
+                return None, "invalid"
             if envelope is None:
                 return None, "invalid"
             log.info("extractor.repaired ext_id=%s", job.ext_id)
