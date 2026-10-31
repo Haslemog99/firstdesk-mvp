@@ -62,4 +62,47 @@ def test_scoring_still_uses_ground_truth(client, auth, app_mod):
     r = client.post(f"/api/siem/{a['id']}/triage", headers=auth, json={
         "action": right, "rationale": "Checked the context and telemetry before deciding."})
     assert r.status_code == 200, r.text
-    assert "Correct" in r.text
+    d = r.json()
+    assert d["correct"] is True and d["base_points"] > 0
+    assert app_mod.evals_col.find_one({"type": "alert_triage", "alert_id": a["id"], "correct": True})
+
+
+def _first_alert_where(app_mod, client, auth, pred):
+    client.post("/api/start", json={"career": "cybersecurity", "experience_level": "experienced", "reset": True},
+                headers=auth)
+    for a in client.get("/api/siem", headers=auth).json()["alerts"]:
+        doc = app_mod.siem_col.find_one({"id": a["id"]})
+        if pred(doc):
+            return doc
+    pytest.skip("no matching alert")
+
+
+def test_take_ownership_neither_reveals_nor_penalises(client, auth, app_mod):
+    doc = _first_alert_where(app_mod, client, auth,
+                             lambda d: d.get("correct_action") in ("escalate", "resolve"))
+    r = client.post(f"/api/siem/{doc['id']}/triage", headers=auth, json={"action": "investigate"})
+    d = r.json()
+    assert r.status_code == 200
+    assert d["points"] == 0 and d["correct"] is None
+    assert not d.get("expected")
+    assert doc["correct_action"] not in d["message"]
+    assert not app_mod.evals_col.find_one({"type": "alert_triage", "alert_id": doc["id"], "action": "investigate"})
+
+
+def test_investigate_still_scores_when_it_is_the_answer(client, auth, app_mod):
+    doc = _first_alert_where(app_mod, client, auth, lambda d: d.get("correct_action") == "investigate")
+    d = client.post(f"/api/siem/{doc['id']}/triage", headers=auth, json={"action": "investigate"}).json()
+    assert d["correct"] is True and d["base_points"] > 0
+
+
+def test_manager_tools_do_not_see_open_answers(client, auth, app_mod):
+    client.post("/api/start", json={"career": "cybersecurity", "experience_level": "experienced", "reset": True},
+                headers=auth)
+    open_alert = client.get("/api/siem", headers=auth).json()["alerts"][0]
+    doc = app_mod.siem_col.find_one({"id": open_alert["id"]})
+    line = app_mod._format_siem_tool_line(doc)
+    assert "correct_action" not in line and "judged=pending" in line
+    closed = {**doc, "triage_status": "reviewed", "status": doc.get("correct_action")}
+    assert "judged=correct" in app_mod._format_siem_tool_line(closed)
+    redacted = app_mod._redact_answer_keys({"data": {"rows": [{"correct_action": "x", "keep": 1}]}})
+    assert redacted == {"data": {"rows": [{"keep": 1}]}}

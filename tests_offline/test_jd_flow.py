@@ -64,17 +64,26 @@ def test_unsupported_track_says_so_and_logs_demand(client, auth, use_llm, app_mo
     assert body["code"] == "jd_role_not_supported"
     assert body["career"] == "procurement"
     assert "isn't a problem with what you pasted" in body["message"]
-    assert "Procurement" in body["message"]
+    assert "procurement and operations role" in body["message"]
+    assert "accounting, cybersecurity, marketing and software engineering" in body["message"]
+    assert "Junior" not in body["message"]
     assert fake.calls == 1  # extractor never called for an unsupported track
     row = app_mod.analytics_col.find_one({"event": "jd_unsupported_role"}, sort=[("ts", -1)])
     assert row and row["data"]["career"] == "procurement"
 
 
 def test_explicit_unsupported_career_is_honest_too(client, auth, use_llm):
-    use_llm(SeqLLM())
+    fake = use_llm(SeqLLM())
     r = _post(client, auth, career="hr")
     assert r.status_code == 422
     assert "isn't a problem with what you pasted" in r.json()["error"]["message"]
+    assert fake.calls == 0  # no model spend on a track we can't build
+
+
+def test_unsupported_and_unparseable_keep_the_rate_limit(client, auth, use_llm):
+    use_llm(SeqLLM("procurement", "procurement"))
+    assert _post(client, auth).status_code == 422
+    assert _post(client, auth).status_code == 429  # can't spam the classifier
 
 
 def test_unreadable_classifier_reply_asks_user_to_pick(client, auth, use_llm):

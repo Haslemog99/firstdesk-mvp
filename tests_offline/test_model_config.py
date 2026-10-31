@@ -1,4 +1,5 @@
-"""Model config: live default, automatic fallback, boot probe surfaced in /api/health."""
+"""Model config: live default, automatic fallback, periodic probe surfaced in /api/health."""
+import pytest
 
 
 def test_default_model_is_not_a_retired_one(app_mod):
@@ -29,6 +30,17 @@ def test_fallback_answers_when_primary_404s(app_mod, monkeypatch):
     monkeypatch.setattr(type(primary), "_generate", lambda self, *a, **k: dead() if self is primary else live())
     assert app_mod.llm.invoke("hi").content == "fallback ok"
     assert fallback is not primary
+
+
+@pytest.fixture(autouse=True)
+def _restore_llm_status(app_mod, monkeypatch):
+    for k, v in list(app_mod.LLM_STATUS.items()):
+        monkeypatch.setitem(app_mod.LLM_STATUS, k, v)
+
+
+def test_models_have_timeouts(app_mod):
+    for m in [app_mod.llm.runnable] + list(app_mod.llm.fallbacks):
+        assert m.request_timeout and m.request_timeout <= 120
 
 
 def test_probe_reports_failure_and_health_degrades(app_mod, client, monkeypatch):

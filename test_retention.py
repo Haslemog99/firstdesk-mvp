@@ -54,6 +54,7 @@ NEED = {
     "_MEETING_ONBOARD_REAL_SEC",
     "_meeting_runtime",
     "_format_siem_tool_line",
+    "_siem_judgement",
 }
 
 NS, MISSING = _extract(NEED)
@@ -169,6 +170,7 @@ line = siem_line({
     "triage_status": "reviewed", "verdict_rationale": "C2 + authorized_keys",
     "correct_action": "escalate",
 })
+assert "correct_action" not in line and "judged=correct" in line, line
 for token in ("ALERT-2026-0218-002", "triage=reviewed", "escalat", "C2 + authorized_keys"):
     check(token.lower() in line.lower() or token in line,
           f"siem tool line must expose {token!r} so Slack theatre is not required")
