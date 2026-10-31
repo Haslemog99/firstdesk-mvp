@@ -654,6 +654,24 @@ def _approximate_query_rows(query: str, sample: dict) -> int:
 # Builders — convert short LLM-friendly specs into well-formed tool docs
 # ──────────────────────────────────────────────────────────────────
 
+_SAFE_ID_RE = re.compile(r"[^A-Za-z0-9_.-]")
+
+def _safe_ids(obj: Any) -> Any:
+    """Restrict every "id" in generated tool data to a plain charset. IDs end up
+    inside click handlers in the UI; this keeps a missed escape from becoming
+    script injection. Actions look rows up by these same cleaned ids."""
+    if isinstance(obj, dict):
+        out = {}
+        for k, v in obj.items():
+            if k in ("id", "card_id", "alert_id", "question_id") and isinstance(v, (str, int)):
+                out[k] = (_SAFE_ID_RE.sub("-", str(v))[:40] or "item")
+            else:
+                out[k] = _safe_ids(v)
+        return out
+    if isinstance(obj, list):
+        return [_safe_ids(v) for v in obj]
+    return obj
+
 def normalise_tool_spec(spec: dict) -> Optional[dict]:
     """Sanitise a tool spec coming from the scenario extractor.
 
@@ -665,16 +683,23 @@ def normalise_tool_spec(spec: dict) -> Optional[dict]:
     tt = (spec.get("tool_type") or spec.get("type") or "").lower().strip()
     if tt not in SUPPORTED_TYPES:
         return None
-    name = (spec.get("name") or tt.title())[:80]
-    icon = (spec.get("icon") or DEFAULT_ICON.get(tt) or "tool")[:24]
-    tint = (spec.get("tint") or DEFAULT_TINT.get(tt) or "#475569")[:9]
-    category = (spec.get("category") or "generic")[:24]
+    name = str(spec.get("name") or tt.title())[:80]
+    # These land in HTML attributes and CSS on the desktop. The spec comes from
+    # an LLM reading a user-supplied job description, so treat it as hostile.
+    icon = str(spec.get("icon") or DEFAULT_ICON.get(tt) or "tool")[:24]
+    if not re.fullmatch(r"[a-z0-9_-]+", icon):
+        icon = DEFAULT_ICON.get(tt) or "tool"
+    tint = str(spec.get("tint") or DEFAULT_TINT.get(tt) or "#475569")[:9]
+    if not re.fullmatch(r"#[0-9A-Fa-f]{3,8}", tint):
+        tint = DEFAULT_TINT.get(tt) or "#475569"
+    category = str(spec.get("category") or "generic")[:24]
     data = spec.get("data") or {}
     if not isinstance(data, dict):
         return None
     cleaned = _normalise_data_for_type(tt, data)
     if cleaned is None:
         return None
+    cleaned = _safe_ids(cleaned)
     return {
         "name": name,
         "tool_type": tt,
