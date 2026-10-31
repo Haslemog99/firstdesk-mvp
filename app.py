@@ -61,6 +61,8 @@ from scenario_engine import (
     Materializer,
     ScenarioEngine,
     ScenarioExtractor,
+    CAREER_TOOL_PALETTE,
+    supports_jd,
     SeedFileSource,
     AdzunaSource,
     build_default_engine,
@@ -3595,9 +3597,23 @@ def _format_siem_tool_line(a: dict) -> str:
         f"[{a.get('severity', '')}] {a.get('id')}: {a.get('title', '')} | "
         f"source={a.get('source', '')} | status={a.get('status', '')} | "
         f"triage={a.get('triage_status', '')} | action={a.get('status', '')} | "
-        f"correct_action={a.get('correct_action', '')} | "
+        f"judged={_siem_judgement(a)} | "
         f"rationale={rationale or '(none)'}"
     )
+
+def _siem_judgement(a: dict) -> str:
+    """Tell the manager whether a CLOSED alert was handled correctly, without
+    ever exposing the right answer for an alert the trainee hasn't closed yet
+    (the trainee can ask the manager, and the manager would repeat it)."""
+    if a.get("triage_status") != "reviewed":
+        return "pending"
+    right = (a.get("correct_action") or "").strip().lower()
+    if not right:
+        return "unknown"
+    did = (a.get("status") or "").strip().lower()
+    # "escalate" and "escalated" are the same verdict (same stem rule as the day debrief).
+    stem = lambda v: v.rstrip("d").rstrip("e")
+    return "correct" if stem(did) == stem(right) else "incorrect"
 
 
 @tool
@@ -3949,7 +3965,7 @@ def triage_alert(alert_id: str, action: str) -> str:
 def get_session_state() -> str:
     """Get simulation state: interactions, progress, triggered events."""
     s = sessions_col.find_one({"session_id": session_id()}, {"_id": 0})
-    return json.dumps(s, indent=2, default=str) if s else "{}"
+    return json.dumps(_redact_answer_keys(s), indent=2, default=str) if s else "{}"
 
 @tool
 def add_performance_note(note: str) -> str:
@@ -4654,15 +4670,63 @@ Use get_tool_data with: {'sage_bank, sage_ledger, sage_invoices' if career=='acc
 
 NEVER do their work. Create pressure. Be realistic. Start as {cfg['manager']['name']} welcoming them — tell them to check Outlook."""
 
-# Pinned dated Fireworks ids: unversioned deepseek-v4-pro hangs; llama-v3p3-70b-instruct is gone.
+# Fireworks retires serverless models without much notice: deepseek-v4-pro went
+# in Aug 2026 and deepseek-v4-pro-0813 on 25 Sep 2026, each time 404ing every
+# AI feature until someone noticed. Set FIREWORKS_MODEL in the deploy env, keep
+# a fallback on a different model family, and probe at boot (see _lifespan).
 FIREWORKS_MODEL = os.environ.get(
-    "FIREWORKS_MODEL", "accounts/fireworks/models/deepseek-v4-pro-0813"
+    "FIREWORKS_MODEL", "accounts/fireworks/models/deepseek-v4p1-flash"
+)
+FIREWORKS_FALLBACK_MODEL = os.environ.get(
+    "FIREWORKS_FALLBACK_MODEL", "accounts/fireworks/models/glm-5p3-flash"
 )
 FIREWORKS_OBSERVER_MODEL = os.environ.get(
     "FIREWORKS_OBSERVER_MODEL", "accounts/fireworks/models/glm-5p3-flash"
 )
-llm = ChatFireworks(model=FIREWORKS_MODEL, api_key=FIREWORKS_KEY, temperature=0.4)
-log.info("fireworks.model=%s observer=%s", FIREWORKS_MODEL, FIREWORKS_OBSERVER_MODEL)
+# A hung call never raises, so without a timeout the fallback would never fire.
+FIREWORKS_TIMEOUT_SEC = float(os.environ.get("FIREWORKS_TIMEOUT_SEC", "60"))
+_primary_llm = ChatFireworks(model=FIREWORKS_MODEL, api_key=FIREWORKS_KEY, temperature=0.4,
+                             timeout=FIREWORKS_TIMEOUT_SEC)
+if FIREWORKS_FALLBACK_MODEL and FIREWORKS_FALLBACK_MODEL != FIREWORKS_MODEL:
+    # Works for plain invoke() and for create_react_agent (bind_tools is
+    # applied to both models), so the manager chat survives a retirement too.
+    llm = _primary_llm.with_fallbacks(
+        [ChatFireworks(model=FIREWORKS_FALLBACK_MODEL, api_key=FIREWORKS_KEY, temperature=0.4,
+                       timeout=FIREWORKS_TIMEOUT_SEC)]
+    )
+else:
+    llm = _primary_llm
+log.info("fireworks.model=%s fallback=%s observer=%s",
+         FIREWORKS_MODEL, FIREWORKS_FALLBACK_MODEL, FIREWORKS_OBSERVER_MODEL)
+
+# Result of the latest probe (boot, then every LLM_PROBE_INTERVAL_SEC); reported by /api/health.
+LLM_PROBE_INTERVAL_SEC = int(os.environ.get("LLM_PROBE_INTERVAL_SEC", "1800"))
+LLM_STATUS: dict = {"primary": "unchecked", "fallback": "unchecked", "checked_at": None}
+
+def _probe_one(model_id: str) -> str:
+    try:
+        ChatFireworks(model=model_id, api_key=FIREWORKS_KEY, temperature=0, max_tokens=8,
+                      timeout=15).invoke("Reply with OK.")
+        return "ok"
+    except Exception as ex:
+        return f"failed: {type(ex).__name__}: {str(ex)[:160]}"
+
+def probe_llm_models() -> dict:
+    """One tiny call per model. Logs at ERROR so a retired model shows up in
+    the deploy logs on the first boot, not five weeks later in LangSmith."""
+    LLM_STATUS["primary"] = _probe_one(FIREWORKS_MODEL)
+    if FIREWORKS_FALLBACK_MODEL and FIREWORKS_FALLBACK_MODEL != FIREWORKS_MODEL:
+        LLM_STATUS["fallback"] = _probe_one(FIREWORKS_FALLBACK_MODEL)
+    else:
+        LLM_STATUS["fallback"] = "not_configured"
+    LLM_STATUS["checked_at"] = datetime.utcnow().isoformat()
+    for role, model_id in (("primary", FIREWORKS_MODEL), ("fallback", FIREWORKS_FALLBACK_MODEL)):
+        state = LLM_STATUS[role]
+        if state.startswith("failed"):
+            log.error("llm.probe_failed role=%s model=%s %s", role, model_id, state)
+        else:
+            log.info("llm.probe role=%s model=%s %s", role, model_id, state)
+    return dict(LLM_STATUS)
 
 # ── ADAPTIVE SCENARIO ENGINE ─────────────────────────────────────
 # Built once at boot. Falls back to the hard-coded seed_* functions when the
@@ -5176,12 +5240,28 @@ def check_escalations():
 # ══════════════════════════════════════════
 
 @asynccontextmanager
+async def _llm_probe_loop() -> None:
+    """Probe at boot, then periodically, so a model retired mid-uptime shows up
+    in /api/health and the logs, and a blip at boot clears itself."""
+    while True:
+        try:
+            # Off the event loop so a slow provider never delays requests.
+            await asyncio.get_running_loop().run_in_executor(None, probe_llm_models)
+        except Exception as ex:
+            log.warning("llm.probe_loop_err kind=%s", type(ex).__name__)
+        await asyncio.sleep(max(60, LLM_PROBE_INTERVAL_SEC))
+
 async def _lifespan(_: FastAPI):
     janitor = asyncio.create_task(_rate_limit_janitor(), name="rate_limit_janitor")
     log.info("startup version=%s log_level=%s", APP_VERSION, _LOG_LEVEL)
+    prober = None
+    if os.environ.get("FIRSTDESK_SKIP_LLM_PROBE") != "1":
+        prober = asyncio.create_task(_llm_probe_loop(), name="llm_probe")
     try:
         yield
     finally:
+        if prober:
+            prober.cancel()
         janitor.cancel()
         try:
             await janitor
@@ -5189,7 +5269,33 @@ async def _lifespan(_: FastAPI):
             pass
         log.info("shutdown")
 
-app = FastAPI(title="FirstDesk", lifespan=_lifespan, docs_url="/api/docs", openapi_url="/api/openapi.json")
+# Ground truth that scoring reads from Mongo but the client must never see.
+# The GRC sim already strips its own (see _GRC_GT_KEYS); this covers every
+# other career at the response layer so a new endpoint can't leak by accident.
+# Teaching scaffolding the UI renders on purpose (playbook, false_positive_
+# indicators, expected_column/stage/value on generic tools) is NOT listed here.
+ANSWER_KEY_FIELDS = frozenset({
+    "is_real_threat", "correct_action", "correct_actions", "threat_type",
+    "false_positive_reason", "level_trap", "correct_amount", "correct_verdict",
+    "correct_reject_reason", "is_flawed", "flaw_type", "is_correct",
+    "expected_artifacts", "expected_substrings", "expected_min_rows",
+    "expected_command_patterns", "points_correct", "points_wrong",
+})
+
+def _redact_answer_keys(obj: Any) -> Any:
+    if isinstance(obj, dict):
+        return {k: _redact_answer_keys(v) for k, v in obj.items() if k not in ANSWER_KEY_FIELDS}
+    if isinstance(obj, list):
+        return [_redact_answer_keys(v) for v in obj]
+    return obj
+
+class AnswerSafeJSONResponse(JSONResponse):
+    """Default response class: drops ANSWER_KEY_FIELDS at any depth."""
+    def render(self, content: Any) -> bytes:
+        return super().render(_redact_answer_keys(content))
+
+app = FastAPI(title="FirstDesk", lifespan=_lifespan, docs_url="/api/docs", openapi_url="/api/openapi.json",
+              default_response_class=AnswerSafeJSONResponse)
 
 # CORS — explicit allow-list from env. Defaults to localhost dev ports only.
 _DEFAULT_ORIGINS = "http://localhost:8000,http://127.0.0.1:8000"
@@ -6242,8 +6348,11 @@ async def health():
     except Exception as ex:
         log.warning("health.mongo_unreachable kind=%s", type(ex).__name__)
         db_status = "unreachable"
-    return {"status": "ok" if db_status == "connected" else "degraded",
-            "db": db_status, "version": APP_VERSION,
+    # Public endpoint: report the state word only, never the provider's error text.
+    ai = {role: LLM_STATUS[role].split(":")[0] for role in ("primary", "fallback")}
+    healthy = db_status == "connected" and ai["primary"] != "failed"
+    return {"status": "ok" if healthy else "degraded",
+            "db": db_status, "ai": ai, "version": APP_VERSION,
             "ts": datetime.utcnow().isoformat()}
 
 @app.get("/api/careers")
@@ -6736,12 +6845,22 @@ async def api_siem_triage(alert_id: str, body: SiemTriageReq):
             pts = -5
             expected = correct_action or ("escalate" if is_real else "resolve")
             msg = f"Incorrect — expected {expected}, you chose {action}. (-5 pts)"
+    # Taking ownership is a step, not a verdict, unless the alert's right answer
+    # *is* "investigate". Before this, Take Ownership on an escalate/resolve alert
+    # cost 5 points and the toast named the correct verdict before any work.
+    neutral_ownership = action == "investigate" and not correct
+    if neutral_ownership:
+        pts = 0
+        correct_action = None  # don't return the answer in "expected"
+        msg = "You've taken ownership. Close it with a documented verdict when you're ready."
     # Idempotence guard: ownership can be re-clicked; score it only once per action.
     already_scored = evals_col.find_one({
         "simulation_id": sim_id(), "type": "alert_triage",
         "alert_id": alert_id, "action": action,
     })
-    if already_scored:
+    if neutral_ownership:
+        already_scored = True  # nothing to record or score
+    elif already_scored:
         pts = 0
         msg = "Already recorded for this action — no points change."
     else:
@@ -6835,7 +6954,8 @@ async def api_siem_triage(alert_id: str, body: SiemTriageReq):
             log.warning("siem.physics.fail key=%s err=%s", key, ex)
 
     sev_target = _SIEM_MTTR_TARGET_MIN.get(sev, 240)
-    return {"ok": True, "correct": correct, "points": pts + bonus_total, "base_points": pts,
+    return {"ok": True, "correct": None if neutral_ownership else correct,
+            "points": pts + bonus_total, "base_points": pts,
             "bonus_points": bonus_total, "bonuses": bonuses, "message": msg, "expected": correct_action,
             "effects": physics_effects, "owned_at": alert.get("owned_at") or upd.get("owned_at"),
             "mttr_target_min": sev_target}
@@ -8640,7 +8760,7 @@ class IngestReq(BaseModel):
     source: Optional[str] = Field(None, pattern=r"^(seed_file|adzuna)$")
     limit: int = Field(5, ge=1, le=20)
 
-@app.post("/api/admin/ingest")
+@app.post("/api/admin/ingest", response_class=JSONResponse)  # admin sees ground truth
 async def api_admin_ingest(req: IngestReq, x_admin_token: Optional[str] = Header(None)):
     """Pull JDs from the configured sources and extract scenarios. Admin-only.
 
@@ -8655,7 +8775,7 @@ async def api_admin_ingest(req: IngestReq, x_admin_token: Optional[str] = Header
     log.info("admin.ingest career=%s source=%s result=%s", req.career, req.source, result)
     return result
 
-@app.get("/api/admin/scenarios")
+@app.get("/api/admin/scenarios", response_class=JSONResponse)  # admin sees ground truth
 async def api_admin_scenarios(x_admin_token: Optional[str] = Header(None)):
     """List cached scenario templates. Admin-only."""
     if not ADMIN_TOKEN or not x_admin_token or not hmac.compare_digest(x_admin_token, ADMIN_TOKEN):
@@ -8676,7 +8796,7 @@ def track(event: str, user_id_val: Optional[str] = None, data: Optional[dict] = 
     except Exception as ex:
         log.warning("analytics.track_failed event=%s kind=%s", event, type(ex).__name__)
 
-@app.get("/api/admin/analytics")
+@app.get("/api/admin/analytics", response_class=JSONResponse)  # admin sees ground truth
 async def api_admin_analytics(x_admin_token: Optional[str] = Header(None), days: int = 7):
     """Event counts for the last N days. Admin-only."""
     if not ADMIN_TOKEN or not x_admin_token or not hmac.compare_digest(x_admin_token, ADMIN_TOKEN):
@@ -8707,6 +8827,23 @@ _JD_URL_ALLOWED_HOSTS = (
 )
 _jd_rate: "dict[str, float]" = {}
 _JD_RATE_SEC = 30.0
+_JD_AI_DOWN_MSG = ("Our AI is temporarily unavailable, so we couldn't build your simulation. "
+                   "This is a problem on our side, not with your job description. Please try again shortly.")
+
+# Plain-English track names for user-facing JD messages (CAREER_CONFIGS titles
+# are sim job titles like "Junior IT Procurement Specialist").
+_JD_TRACK_NAMES = {
+    "accountant": "accounting", "cybersecurity": "cybersecurity",
+    "marketing": "marketing", "developer": "software engineering",
+    "procurement": "procurement and operations", "hr": "HR and people",
+    "pm": "product", "grc": "governance, risk and compliance",
+}
+
+def _jd_supported_labels() -> str:
+    names = [_JD_TRACK_NAMES.get(c, c) for c in CAREER_TOOL_PALETTE]
+    return ", ".join(names[:-1]) + " and " + names[-1] if len(names) > 1 else "".join(names)
+
+_JD_SUPPORTED_LABELS = _jd_supported_labels()
 
 def _strip_html_to_text(html: str) -> str:
     # Drop scripts/styles/nav, then collapse tags. Keep paragraph breaks.
@@ -8769,21 +8906,32 @@ _CAREER_CLASSIFIER_PROMPT = (
 )
 _VALID_CAREERS = {"accountant", "cybersecurity", "marketing", "developer", "procurement", "hr", "pm", "grc"}
 
-def _classify_career_from_jd(jd_text: str, title: str = "") -> str:
-    """Pick the closest of the 8 careers for a free-form JD. Falls back to 'pm' on failure."""
+class CareerClassifierUnavailable(RuntimeError):
+    """The model call itself failed. Never the user's fault, never a silent default."""
+
+def _classify_career_from_jd(jd_text: str, title: str = "") -> Optional[str]:
+    """Pick the closest of the 8 careers for a free-form JD.
+
+    Returns None when the model answered but not with a known career, so the
+    caller can ask the user to choose. Raises CareerClassifierUnavailable when
+    the model call fails. (It used to return 'pm' for both, which hid a five-
+    week model outage behind a misleading "try a more detailed description".)
+    """
     snippet = (title + "\n\n" + (jd_text or ""))[:3000].strip()
     if not snippet:
-        return "pm"
+        return None
     try:
         resp = llm.invoke([("system", _CAREER_CLASSIFIER_PROMPT), ("human", snippet)], config=_ls_config("career_classifier"))
-        choice = (getattr(resp, "content", "") or "").strip().lower().split()[0] if resp else ""
-        choice = choice.strip(".,:;()\"'")
-        if choice in _VALID_CAREERS:
-            log.info("jd.career_classified=%s title=%r", choice, title[:60])
-            return choice
     except Exception as ex:
-        log.warning("jd.classify_failed kind=%s", type(ex).__name__)
-    return "pm"
+        log.error("jd.classify_failed kind=%s err=%s", type(ex).__name__, str(ex)[:200])
+        raise CareerClassifierUnavailable(type(ex).__name__) from ex
+    words = (getattr(resp, "content", "") or "").strip().lower().split() if resp else []
+    choice = words[0].strip(".,:;()\"'") if words else ""
+    if choice in _VALID_CAREERS:
+        log.info("jd.career_classified=%s title=%r", choice, title[:60])
+        return choice
+    log.warning("jd.classify_unparsed reply=%r", " ".join(words)[:80])
+    return None
 
 class JDIngestReq(BaseModel):
     career: str = Field("auto", pattern=r"^(auto|accountant|cybersecurity|marketing|developer|procurement|hr|pm|grc)$")
@@ -8821,7 +8969,31 @@ async def api_scenario_from_jd(req: JDIngestReq, request: Request):
     # Auto-classify career if the user picked "Auto-detect" (or any role outside our 7 fixed tracks)
     resolved_career = req.career
     if resolved_career == "auto":
-        resolved_career = _classify_career_from_jd(jd_text, jd_title)
+        try:
+            resolved_career = _classify_career_from_jd(jd_text, jd_title)
+        except CareerClassifierUnavailable:
+            _jd_rate.pop(uid, None)  # our fault: let them retry straight away
+            track("jd_ai_unavailable", uid, {"stage": "classify"})
+            raise HTTPException(503, _JD_AI_DOWN_MSG)
+        if resolved_career is None:
+            raise HTTPException(422, "We couldn't tell which kind of role this is. "
+                                     "Pick the closest career from the list and try again.")
+
+    if not supports_jd(resolved_career):
+        # Honest answer instead of a scenario we can't build. Logged so demand
+        # for each unsupported track is visible in /api/admin/analytics.
+        label = _JD_TRACK_NAMES.get(resolved_career, resolved_career)
+        track("jd_unsupported_role", uid, {
+            "career": resolved_career, "title": jd_title[:120],
+            "auto": req.career == "auto", "chars": len(jd_text),
+        })
+        raise HTTPException(422, detail={
+            "error": "jd_role_not_supported",
+            "message": (f"This looks like a {label} role. We can't build a custom simulation for that "
+                        f"from a job description yet, so this isn't a problem with what you pasted. "
+                        f"Custom simulations work for {_JD_SUPPORTED_LABELS} roles."),
+            "career": resolved_career,
+        })
 
     # Build a JobPosting and run it through the extractor + materializer directly.
     from scenario_engine import JobPosting as _JP
@@ -8841,6 +9013,11 @@ async def api_scenario_from_jd(req: JDIngestReq, request: Request):
     engine = get_scenario_engine()
     template = engine.extractor.extract(job)
     if template is None:
+        reason = getattr(engine.extractor, "last_failure", None)
+        if reason == "llm":
+            _jd_rate.pop(uid, None)
+            track("jd_ai_unavailable", uid, {"stage": "extract", "career": resolved_career})
+            raise HTTPException(503, _JD_AI_DOWN_MSG)
         raise HTTPException(422, "Couldn't extract a workable scenario from that JD. Try a more detailed description.")
 
     # Persist for reuse + cache the JD
@@ -9264,7 +9441,7 @@ def get_tool_content(tool_id: str) -> str:
         "tool_id":   t["tool_id"],
         "name":      t.get("name"),
         "tool_type": t.get("tool_type"),
-        "data":      t.get("data"),
+        "data":      _redact_answer_keys(t.get("data")),
     }, default=str)[:6000]
 
 

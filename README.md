@@ -24,7 +24,10 @@ Then open http://localhost:8000.
 | `AUTH_SECRET` | HMAC key for signed tokens. Generate: `python3 -c "import secrets; print(secrets.token_hex(32))"` |
 | `MONGO_URI` | MongoDB Atlas connection string |
 | `FIREWORKS_API_KEY` | LLM provider |
-| `FIREWORKS_MODEL` | Optional. Default `deepseek-v4-pro-0813` |
+| `FIREWORKS_MODEL` | Main model. Default `deepseek-v4p1-flash`. Set it in the deploy env |
+| `FIREWORKS_FALLBACK_MODEL` | Used automatically if the main model errors. Default `glm-5p3-flash` |
+
+`/api/health` reports `ai.primary` and `ai.fallback` from a one-token probe at boot; a `failed` primary turns the status `degraded`. Check it after every deploy.
 
 Optional: `LANGSMITH_API_KEY` (traces LLM runs at https://smith.langchain.com), `HUME_API_KEY`, `ADMIN_TOKEN`, `STRICT_ENV=1` (fail fast).
 
