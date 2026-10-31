@@ -1995,7 +1995,7 @@ if(jd){
   }catch(e){hideLoader();toast('Network error. Try again.','error');return}
   // If user picked auto-detect, surface what the backend resolved to
   if(d&&d.career_auto_detected&&d.career){
-    const _careerLabels={accountant:'Accountant',cybersecurity:'Cybersecurity Analyst',marketing:'Marketing / Growth',developer:'Software Engineer',procurement:'Procurement / Ops',hr:'L&D / People',pm:'Product Manager'};
+    const _careerLabels={accountant:'Accountant',cybersecurity:'Cybersecurity Analyst',marketing:'Marketing / Growth',developer:'Software Engineer',procurement:'Procurement / Ops',hr:'L&D / People',pm:'Product Manager',grc:'GRC Analyst'};
     toast('Detected role: '+(_careerLabels[d.career]||d.career),'success');
   }
   await _bootSimulation(d, (d&&d.career)||career);

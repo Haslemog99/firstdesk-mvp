@@ -527,16 +527,27 @@ def _palette_for(career: str) -> str:
     return ", ".join(CAREER_TOOL_PALETTE.get(career, ()))
 
 
+def supports_jd(career: str) -> bool:
+    """True when a pasted JD for this career can be turned into a scenario."""
+    return bool(CAREER_TOOL_PALETTE.get(career))
+
+
 class ScenarioExtractor:
     """Wraps an LLM, produces a `ScenarioTemplate` from a `JobPosting`."""
 
     def __init__(self, llm: Any) -> None:
         self.llm = llm
+        # Why the last extract() returned None: "no_palette" (career not
+        # supported from a JD), "llm" (provider error, not the user's fault),
+        # "invalid" (the model's output didn't parse or validate). None on success.
+        self.last_failure: Optional[str] = None
 
     def extract(self, job: JobPosting) -> Optional[ScenarioTemplate]:
+        self.last_failure = None
         palette = _palette_for(job.career)
         if not palette:
             log.warning("extractor.no_palette career=%s", job.career)
+            self.last_failure = "no_palette"
             return None
         sys_prompt = EXTRACTOR_SYSTEM_PROMPT.replace("{palette}", palette)
         human = (
@@ -551,13 +562,19 @@ class ScenarioExtractor:
             resp = self.llm.invoke([("system", sys_prompt), ("human", human)])
             raw = resp.content if hasattr(resp, "content") else str(resp)
         except Exception as ex:
-            log.warning("extractor.llm_failed ext_id=%s kind=%s", job.ext_id, type(ex).__name__)
+            log.error("extractor.llm_failed ext_id=%s kind=%s err=%s",
+                      job.ext_id, type(ex).__name__, str(ex)[:200])
+            self.last_failure = "llm"
             return None
         envelope = self._parse_envelope(raw)
         if envelope is None:
             log.warning("extractor.parse_failed ext_id=%s preview=%r", job.ext_id, raw[:200] if raw else "")
+            self.last_failure = "invalid"
             return None
-        return self._validate_and_build(job, envelope)
+        template = self._validate_and_build(job, envelope)
+        if template is None:
+            self.last_failure = "invalid"
+        return template
 
     @staticmethod
     def _parse_envelope(text: str) -> Optional[dict]:
