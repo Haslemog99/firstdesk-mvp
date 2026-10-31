@@ -297,13 +297,16 @@ def _async_lock(registry: dict, key: str) -> asyncio.Lock:
 
 def _evict_if_full(d: dict, limit: int = _USER_CACHE_LIMIT) -> None:
     if len(d) > limit:
-        # Drop oldest insertion-order entry (Python 3.7+ dicts preserve order).
-        try:
-            oldest = next(iter(d))
-            d.pop(oldest, None)
-            log.info("cache.evict key=%s remaining=%d", oldest, len(d))
-        except StopIteration:
-            pass
+        # Drop the oldest insertion-order entry (Python 3.7+ dicts preserve
+        # order), skipping held locks: evicting one would hand the next request
+        # a fresh, unlocked lock and break the per-user guards.
+        for key in list(d):
+            v = d[key]
+            if isinstance(v, asyncio.Lock) and v.locked():
+                continue
+            d.pop(key, None)
+            log.info("cache.evict key=%s remaining=%d", key, len(d))
+            return
 
 def get_orchestrator():
     uid = _user_id_var.get()
@@ -318,15 +321,55 @@ def set_orchestrator(orc) -> None:
         _user_orchestrators[uid] = orc
         _evict_if_full(_user_orchestrators)
 
+_CHAT_HISTORY_MAX = 80  # messages (40 turns) fed back to the manager
+
+def _load_chat_history_from_db(sid: str) -> list:
+    """Rebuild the manager's conversation from agent_memory, which already logs
+    every turn. Only turns after the latest reset marker count, so a fresh sim
+    doesn't inherit the last one's conversation."""
+    try:
+        marker = memory_col.find_one({"session_id": sid, "role": "reset"}, {"_id": 1}, sort=[("_id", -1)])
+        q: dict = {"session_id": sid, "role": {"$in": ["human", "ai"]}}
+        if marker:
+            q["_id"] = {"$gt": marker["_id"]}
+        # Turns written before this deploy have no reset marker, and clear_sim
+        # never deleted them (they carry session_id, not simulation_id). Bound by
+        # the current sim's start too, so an old sim's chat can't leak in.
+        sess = sessions_col.find_one({"session_id": sid}, {"_id": 0, "started_at": 1}) or {}
+        if sess.get("started_at"):
+            q["ts"] = {"$gte": sess["started_at"]}
+        rows = list(memory_col.find(q, {"_id": 0, "role": 1, "content": 1})
+                    .sort("_id", -1).limit(_CHAT_HISTORY_MAX))
+        return [(r["role"], r.get("content") or "") for r in reversed(rows)]
+    except Exception as ex:
+        log.warning("chat.history_load_failed kind=%s", type(ex).__name__)
+        return []
+
 def get_chat_history() -> list:
     uid = _user_id_var.get() or "_anon"
-    h = _user_chat_history.setdefault(uid, [])
-    _evict_if_full(_user_chat_history)
+    h = _user_chat_history.get(uid)
+    if h is None:
+        # Cache miss after a restart, deploy or LRU eviction: reload, don't forget.
+        sid = _session_id_var.get()
+        h = _load_chat_history_from_db(sid) if sid else []
+        _user_chat_history[uid] = h
+        _evict_if_full(_user_chat_history)
     return h
 
 def reset_chat_history() -> None:
     uid = _user_id_var.get() or "_anon"
     _user_chat_history[uid] = []
+    sid = _session_id_var.get()
+    if sid:
+        try:
+            memory_col.insert_one({"session_id": sid, "role": "reset", "ts": datetime.utcnow().isoformat()})
+        except Exception as ex:
+            log.warning("chat.reset_marker_failed kind=%s", type(ex).__name__)
+
+def _saved_experience_level() -> str:
+    s = sessions_col.find_one({"session_id": session_id()}, {"_id": 0, "experience_level": 1}) or {}
+    lvl = s.get("experience_level")
+    return lvl if lvl in ("experienced", "studied", "beginner") else "studied"
 
 def _current_day() -> int:
     """Current day cursor for the active session. Drives day-progression
@@ -5610,7 +5653,11 @@ async def auth_and_scope(request: Request, call_next):
             async with _orchestrator_lock:
                 if get_orchestrator() is None:  # double-check after acquire
                     try:
-                        set_orchestrator(create_orchestrator(saved_career))
+                        # Rebuild with the user's own level, not the "studied" default:
+                        # after a restart beginners and experienced users were
+                        # silently getting the wrong manager.
+                        lvl = await asyncio.to_thread(_saved_experience_level)
+                        set_orchestrator(create_orchestrator(saved_career, lvl))
                         log.info("auth.orchestrator_created user=%s career=%s", user["user_id"], saved_career)
                     except Exception as ex:
                         log.exception("auth.orchestrator_create_failed user=%s career=%s kind=%s",
@@ -5872,7 +5919,7 @@ _USER_DATA_COLS_BY_SIM_ID = (
 )
 # sessions_col stores its sim handle under the field `sim_id`, not `simulation_id`,
 # and its primary key is session_id. Deleted separately by session_id.
-_USER_DATA_COLS_BY_SESSION_ID = ("sessions_col",)
+_USER_DATA_COLS_BY_SESSION_ID = ("sessions_col", "memory_col")  # chat turns carry session_id only
 
 class TrackReq(BaseModel):
     kind: str = Field(..., pattern=r"^(tool_switch|email_open|idle|focus_blur|custom)$", max_length=32)
@@ -6001,7 +6048,8 @@ async def auth_delete_account(authorization: Optional[str] = Header(None)):
     # Per-process caches keyed by user_id.
     _user_orchestrators.pop(uid, None)
     _user_chat_history.pop(uid, None)
-    _user_locks.pop(uid, None)
+    for k in (uid, f"{uid}:jd", f"{uid}:meeting"):
+        _user_locks.pop(k, None)
     users_col.delete_one({"user_id": uid})
     _invalidate_user_cache(uid)
     log.info("auth.account_deleted user=%s totals=%s", uid, deleted)
@@ -6220,8 +6268,8 @@ async def chat(req: ChatReq, request: Request, background: BackgroundTasks):
         history.append(("human", req.message))
         history.append(("ai", resp))
         # Trim chat_history to last 40 turns to keep token usage bounded over a long day
-        if len(history) > 80:
-            del history[:len(history)-80]
+        if len(history) > _CHAT_HISTORY_MAX:
+            del history[:len(history)-_CHAT_HISTORY_MAX]
     return {"response": resp}
 
 @app.post("/api/email/{email_id}/read")
@@ -8144,6 +8192,12 @@ async def api_meeting_scene(meeting_id: str):
 @app.post("/api/meetings/{meeting_id}/submit")
 async def api_meeting_submit(meeting_id: str, body: MeetingSubmitReq):
     """Your turn in the room. Scored against what you actually did."""
+    # The LLM reaction now awaits a worker thread, so a double-click could pass
+    # the "already submitted" check twice. One submit per user at a time.
+    async with _async_lock(_user_locks, f"{user_id()}:meeting"):
+        return await _meeting_submit_impl(meeting_id, body)
+
+async def _meeting_submit_impl(meeting_id: str, body: MeetingSubmitReq):
     s = sessions_col.find_one({"session_id": session_id()}) or {}
     clock = _sim_clock(s)
     career = s.get("career") or get_career() or ""
@@ -8161,7 +8215,7 @@ async def api_meeting_submit(meeting_id: str, body: MeetingSubmitReq):
                             else "That meeting is over.")
 
     grounding = _meeting_grounding(career)
-    reaction = _meeting_react(s, m, body.summary, grounding)
+    reaction = await asyncio.to_thread(_meeting_react, s, m, body.summary, grounding)
 
     base = int(m.get("points", 10))
     quality = reaction["quality"]
@@ -8944,6 +8998,16 @@ class JDIngestReq(BaseModel):
 @app.post("/api/scenario/from-jd")
 async def api_scenario_from_jd(req: JDIngestReq, request: Request):
     """User pastes a job URL or full description → engine extracts → materialises into THIS user's sim, replacing whatever's there."""
+    # Model calls now await worker threads, and extraction can outlast the 30s
+    # rate window. Without this, a second paste could materialise into the same
+    # sim while the first is still running.
+    lk = _async_lock(_user_locks, f"{request.state.user['user_id']}:jd")
+    if lk.locked():
+        raise HTTPException(429, "Your last job description is still being processed. Give it a moment.")
+    async with lk:
+        return await _scenario_from_jd_impl(req, request)
+
+async def _scenario_from_jd_impl(req: JDIngestReq, request: Request):
     user = request.state.user
     uid = user["user_id"]
 
@@ -8961,7 +9025,7 @@ async def api_scenario_from_jd(req: JDIngestReq, request: Request):
         jd_text = req.text.strip()[:8000]
         jd_title = (req.title or "Pasted Job Description").strip()[:200]
     else:
-        jd_title, jd_text = _fetch_jd_from_url(req.url.strip())
+        jd_title, jd_text = await asyncio.to_thread(_fetch_jd_from_url, req.url.strip())
         if req.title:
             jd_title = req.title.strip()[:200]
     company = (req.company or "Custom Scenario Co").strip()[:120] or "Custom Scenario Co"
@@ -8970,7 +9034,7 @@ async def api_scenario_from_jd(req: JDIngestReq, request: Request):
     resolved_career = req.career
     if resolved_career == "auto":
         try:
-            resolved_career = _classify_career_from_jd(jd_text, jd_title)
+            resolved_career = await asyncio.to_thread(_classify_career_from_jd, jd_text, jd_title)
         except CareerClassifierUnavailable:
             _jd_rate.pop(uid, None)  # our fault: let them retry straight away
             track("jd_ai_unavailable", uid, {"stage": "classify"})
@@ -9011,9 +9075,10 @@ async def api_scenario_from_jd(req: JDIngestReq, request: Request):
     )
 
     engine = get_scenario_engine()
-    template = engine.extractor.extract(job)
+    # extract_with_reason returns the failure reason instead of storing it on
+    # the shared extractor, so two users' JDs in flight can't mix them up.
+    template, reason = await asyncio.to_thread(engine.extractor.extract_with_reason, job)
     if template is None:
-        reason = getattr(engine.extractor, "last_failure", None)
         if reason == "llm":
             _jd_rate.pop(uid, None)
             track("jd_ai_unavailable", uid, {"stage": "extract", "career": resolved_career})
@@ -9114,9 +9179,12 @@ async def api_slack_post(req: SlackPostReq):
         "action": f"slack:{ch}:{req.text[:200]}",
         "ts": datetime.utcnow().isoformat(),
     })
-    # Tone observer applies to Slack posts too
-    observe_tone(req.text)
-    check_escalations()
+    # Tone observer applies to Slack posts too. It's an LLM call, so it runs in
+    # a worker thread (contextvars are copied) instead of freezing every user.
+    def _tone_and_escalate(text: str) -> None:
+        observe_tone(text)
+        check_escalations()
+    await asyncio.to_thread(_tone_and_escalate, req.text)
     emit("slack_posted", {"channel": ch, "text": req.text})
     return {"ok": True, "message": {k: v for k, v in row.items() if k != "_id"}}
 

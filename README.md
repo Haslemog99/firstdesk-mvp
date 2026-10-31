@@ -31,6 +31,23 @@ Then open http://localhost:8000.
 
 Optional: `LANGSMITH_API_KEY` (traces LLM runs at https://smith.langchain.com), `HUME_API_KEY`, `ADMIN_TOKEN`, `STRICT_ENV=1` (fail fast).
 
+## Tests
+```
+pip install -r requirements-dev.txt
+python3 -m pytest tests_offline -q        # no keys or database needed
+```
+The `test_*.py` scripts at the root run against a live server (see each file's header).
+
+## Before switching models
+`python3 scripts/eval_career_classifier.py --model <new model id>` scores the JD classifier
+on 16 labelled job descriptions and exits non-zero below 85%. Run it before changing
+`FIREWORKS_MODEL`.
+
+## Backups
+The Atlas free tier has no backups. Either move the cluster to a tier with snapshots,
+or run `mongodump --uri "$MONGO_URI" --out backup-$(date +%F)` on a schedule and keep
+the output somewhere other than Atlas.
+
 ## Password reset
 Users reset their own password from the sign-in card via **Forgot password?**. The
 server mails a single-use link that expires in 60 minutes; only a sha256 of the

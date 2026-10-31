@@ -543,12 +543,18 @@ class ScenarioExtractor:
         self.last_failure: Optional[str] = None
 
     def extract(self, job: JobPosting) -> Optional[ScenarioTemplate]:
-        self.last_failure = None
+        template, self.last_failure = self.extract_with_reason(job)
+        return template
+
+    def extract_with_reason(self, job: JobPosting) -> tuple[Optional[ScenarioTemplate], Optional[str]]:
+        """Like extract(), but returns (template, failure_reason) instead of
+        storing the reason on the shared instance. Safe to call from threads.
+        Reasons: "no_palette" (career not supported from a JD), "llm" (provider
+        error, not the user's fault), "invalid" (output didn't parse/validate)."""
         palette = _palette_for(job.career)
         if not palette:
             log.warning("extractor.no_palette career=%s", job.career)
-            self.last_failure = "no_palette"
-            return None
+            return None, "no_palette"
         sys_prompt = EXTRACTOR_SYSTEM_PROMPT.replace("{palette}", palette)
         human = (
             f"CAREER: {job.career}\n"
@@ -564,17 +570,32 @@ class ScenarioExtractor:
         except Exception as ex:
             log.error("extractor.llm_failed ext_id=%s kind=%s err=%s",
                       job.ext_id, type(ex).__name__, str(ex)[:200])
-            self.last_failure = "llm"
-            return None
+            return None, "llm"
         envelope = self._parse_envelope(raw)
         if envelope is None:
             log.warning("extractor.parse_failed ext_id=%s preview=%r", job.ext_id, raw[:200] if raw else "")
-            self.last_failure = "invalid"
-            return None
+            # One repair attempt, only when it can help: the model tried to emit
+            # JSON (there's a "{") and the output is short enough that it wasn't
+            # cut off at the token limit (a repair would just be cut off again).
+            if not raw or "{" not in raw or len(raw) > 12000:
+                return None, "invalid"
+            try:
+                fix = self.llm.invoke([
+                    ("system", "You repair malformed JSON. Return only the corrected JSON object, "
+                               "with no commentary and no code fences."),
+                    ("human", raw),
+                ])
+                envelope = self._parse_envelope(fix.content if hasattr(fix, "content") else str(fix))
+            except Exception as ex:
+                # The provider answered the first call, so treat this like an
+                # unusable answer rather than an outage.
+                log.warning("extractor.repair_failed ext_id=%s kind=%s", job.ext_id, type(ex).__name__)
+                return None, "invalid"
+            if envelope is None:
+                return None, "invalid"
+            log.info("extractor.repaired ext_id=%s", job.ext_id)
         template = self._validate_and_build(job, envelope)
-        if template is None:
-            self.last_failure = "invalid"
-        return template
+        return template, (None if template is not None else "invalid")
 
     @staticmethod
     def _parse_envelope(text: str) -> Optional[dict]:
