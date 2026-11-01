@@ -1200,8 +1200,8 @@ def _artifact_present(spec: str, task: dict) -> bool:
             a = siem_col.find_one({"id": arg, "simulation_id": sim_id()}, {"_id": 0}) or {}
             # Taking ownership ("investigating") is a step, not triage evidence.
             return a.get("triage_status") == "reviewed"
-        s = sessions_col.find_one({"session_id": session_id()}, {"alerts_triaged": 1}) or {}
-        return bool(s.get("alerts_triaged"))
+        # alerts_triaged also records Take Ownership, so check for a real verdict.
+        return bool(siem_col.find_one({"simulation_id": sim_id(), "triage_status": "reviewed"}, {"_id": 1}))
     if kind == "journal_posted":
         s = sheets_col.find_one({"simulation_id": sim_id()}) or {}
         return any(e.get("posted_by") == "you" for e in (s.get("general_ledger") or []))
@@ -1295,6 +1295,11 @@ def _review_evidence_missing(t: dict) -> list[str]:
     return missing
 
 
+# Per-process secret on background review messages. The router trusts only
+# messages carrying it, so a user can't type "[SYSTEM EVENT ..." to steer the
+# manager into treating their text as a trusted system instruction.
+_SYSTEM_EVENT_TAG = f"[SYSTEM EVENT {secrets.token_hex(8)} — not a user message]"
+
 def _run_manager_review_sync(uid: str, sm: str, sid: str, career: Optional[str]) -> None:
     """BackgroundTasks entrypoint — run a manager review pass over every
     pending_review task so verdict + feedback email land without the user
@@ -1315,7 +1320,7 @@ def _run_manager_review_sync(uid: str, sm: str, sid: str, career: Optional[str])
                 return
             titles = ", ".join(f"'{p['title']}' (id:{p['id']})" for p in pend)
             msg = (
-                "[SYSTEM EVENT — not a user message] "
+                f"{_SYSTEM_EVENT_TAG} "
                 f"{titles} {'is' if len(pend) == 1 else 'are'} now pending_review. "
                 "Run your MANAGER TASK REVIEW on each right now: inspect the real evidence "
                 "(get_tool_data / read_email / slack_read), call manager_review_task with a "
@@ -4964,7 +4969,7 @@ def _classify_route(state: _OrcState) -> dict:
     # client agents have no manager_review_task tool, so a misroute meant the
     # review silently never happened. (Typing this prefix only gets a user the
     # default persona anyway.)
-    if text.startswith("[SYSTEM EVENT"):
+    if text.startswith(_SYSTEM_EVENT_TAG):
         return {"route": "manager"}
     sys = (
         "You route a user message to ONE of four NPCs in a workplace simulator. "
@@ -5741,8 +5746,14 @@ async def auth_and_scope(request: Request, call_next):
 # ── AUTH ENDPOINTS ────────────────────────────────────
 @app.post("/api/auth/signup", response_model=TokenOut, responses={409: {"model": ErrorEnvelope}})
 @app.post("/api/auth/register", response_model=TokenOut, responses={409: {"model": ErrorEnvelope}})
-async def auth_signup(req: SignupReq) -> TokenOut:
+async def auth_signup(req: SignupReq, request: Request) -> TokenOut:
     _ensure_bootstrap()
+    if not _ip_hourly_ok("signup", request):
+        raise HTTPException(429, "Too many sign-ups from your network. Please try again later.")
+    hour_ago = (datetime.utcnow() - timedelta(hours=1)).isoformat()
+    if users_col.count_documents({"is_guest": {"$ne": True}, "created_at": {"$gte": hour_ago}}) >= SIGNUP_HOURLY_CAP:
+        log.warning("auth.signup_cap_reached cap=%d", SIGNUP_HOURLY_CAP)
+        raise HTTPException(429, "Sign-ups are busy right now. Please try again in a few minutes.")
     email = req.email.strip().lower()
     if not EMAIL_RE.match(email):
         raise HTTPException(400, "Please enter a valid email address.")
@@ -5752,11 +5763,12 @@ async def auth_signup(req: SignupReq) -> TokenOut:
         raise HTTPException(409, "An account with that email already exists.")
     user_id = "u_" + secrets.token_hex(8)
     now = datetime.utcnow().isoformat()
+    pw_hash = await asyncio.to_thread(_hash_pw, req.password)  # ~200ms of PBKDF2, off the event loop
     u = {
         "user_id": user_id,
         "email": email,
         "name": (req.name or "").strip()[:80],
-        "password_hash": _hash_pw(req.password),
+        "password_hash": pw_hash,
         "created_at": now,
         "consent_given": True,
         "consent_at": now,
@@ -5782,15 +5794,17 @@ _LOCKED_MSG = ("Too many sign-in attempts for this account. Try again in 15 minu
 # ~200ms of PBKDF2 as a wrong password and response time can't reveal accounts.
 _DUMMY_PW_HASH = _hash_pw(secrets.token_hex(16))
 
-def _login_locked(email: str) -> bool:
+def _reserve_login_attempt(email: str) -> bool:
+    """Record the attempt BEFORE checking the password, then count. Counting
+    first and recording after the ~200ms hash let a burst of parallel guesses
+    all pass the check (200 concurrent tries were all evaluated). Now every
+    request in a burst is counted before any is evaluated, so the cap holds
+    and requests over it never reach PBKDF2. Returns False when over the cap.
+    A successful sign-in clears the records, so a correct login isn't
+    counted against the user."""
+    login_failures_col.insert_one({"email": email, "at": datetime.utcnow()})
     since = datetime.utcnow() - timedelta(seconds=LOGIN_WINDOW_SEC)
-    return login_failures_col.count_documents({"email": email, "at": {"$gte": since}}) >= LOGIN_MAX_FAILURES
-
-def _record_login_failure(email: str) -> None:
-    try:
-        login_failures_col.insert_one({"email": email, "at": datetime.utcnow()})
-    except Exception as ex:
-        log.warning("auth.failure_record_failed kind=%s", type(ex).__name__)
+    return login_failures_col.count_documents({"email": email, "at": {"$gte": since}}) <= LOGIN_MAX_FAILURES
 
 def _clear_login_failures(email: str) -> None:
     try:
@@ -5805,14 +5819,13 @@ async def auth_login(req: LoginReq) -> TokenOut:
     email = req.email.strip().lower()
     # Checked before the password, and for unknown emails too, so a locked
     # account and a missing one look the same.
-    if _login_locked(email):
+    if not _reserve_login_attempt(email):
         log.info("auth.login_locked email_hash=%s", hashlib.sha256(email.encode()).hexdigest()[:12])
         raise HTTPException(429, _LOCKED_MSG)
     u = users_col.find_one({"email": email})
     # PBKDF2 is ~200ms of CPU: run it off the event loop, and always run it.
     ok = await asyncio.to_thread(_verify_pw, req.password, (u or {}).get("password_hash") or _DUMMY_PW_HASH)
     if not u or not ok:
-        _record_login_failure(email)
         # Same message for both branches, so we don't leak which side failed.
         raise HTTPException(401, "Invalid email or password.")
     _clear_login_failures(email)
@@ -5838,15 +5851,35 @@ async def auth_logout():
     # Stateless tokens — client just discards. Endpoint exists for symmetry.
     return {"ok": True}
 
-GUEST_HOURLY_CAP = int(os.environ.get("GUEST_HOURLY_CAP", "60"))
+# Account-creation limits. Per-IP limits stop one client from flooding; the
+# hourly totals are a backstop that protects the 512 MB free-tier cluster if
+# IPs are spoofed or rotated. Tune via env.
+GUEST_HOURLY_CAP = int(os.environ.get("GUEST_HOURLY_CAP", "200"))
+SIGNUP_HOURLY_CAP = int(os.environ.get("SIGNUP_HOURLY_CAP", "300"))
+_PER_IP_HOURLY = {"guest": int(os.environ.get("GUEST_PER_IP_HOURLY", "5")),
+                  "signup": int(os.environ.get("SIGNUP_PER_IP_HOURLY", "10"))}
+_ip_hourly: "dict[str, deque]" = defaultdict(lambda: deque(maxlen=64))
+
+def _ip_hourly_ok(kind: str, request: Request) -> bool:
+    key = f"{kind}:{_client_ip(request)}"
+    q, now = _ip_hourly[key], time.time()
+    while q and now - q[0] > 3600:
+        q.popleft()
+    if len(q) >= _PER_IP_HOURLY[kind]:
+        return False
+    q.append(now)
+    _evict_if_full(_ip_hourly, limit=5000)
+    return True
 
 @app.post("/api/auth/guest", response_model=TokenOut)
-async def auth_guest() -> TokenOut:
+async def auth_guest(request: Request) -> TokenOut:
     """Throwaway guest session. Progress is real but flagged is_guest=True so the
     frontend can show a 'Register to save' banner. Tokens still expire in 7 days."""
     _ensure_bootstrap()
     # Each guest seeds a full simulation (the cyber sim alone is ~100 alerts).
     # Without a cap, a script could fill the 512 MB free-tier cluster in minutes.
+    if not _ip_hourly_ok("guest", request):
+        raise HTTPException(429, "Too many guest sessions from your network. Create a free account to continue.")
     hour_ago = (datetime.utcnow() - timedelta(hours=1)).isoformat()
     if users_col.count_documents({"is_guest": True, "created_at": {"$gte": hour_ago}}) >= GUEST_HOURLY_CAP:
         log.warning("auth.guest_cap_reached cap=%d", GUEST_HOURLY_CAP)
@@ -6000,11 +6033,12 @@ async def auth_reset_password(req: ResetPasswordReq) -> TokenOut:
     # redirect this at somebody else's login.
     uid = doc["user_id"]
     user = users_col.find_one({"user_id": uid})
+    pw_hash = await asyncio.to_thread(_hash_pw, req.password)
     if not _can_request_reset(user):
         raise HTTPException(400, "That reset link is no longer valid.")
 
     users_col.update_one({"user_id": uid}, {"$set": {
-        "password_hash": _hash_pw(req.password),
+        "password_hash": pw_hash,
         "password_changed_at": datetime.utcnow().isoformat(),
     }})
     password_resets_col.delete_many({"user_id": uid})
@@ -6302,6 +6336,9 @@ async def chat(req: ChatReq, request: Request, background: BackgroundTasks):
     user = request.state.user
     if not _check_rate_limit(_client_ip(request)):
         raise HTTPException(429, "Slow down — too many messages. Please wait a moment.")
+    if "[system event" in (req.message or "").lower():
+        # Reserved for the app's own background review passes.
+        raise HTTPException(400, "That message format is reserved. Please rephrase.")
     orc = get_orchestrator()
     if not orc:
         log.warning("chat.no_orchestrator user=%s career=%s", user["user_id"], get_career())
@@ -9023,26 +9060,26 @@ _JD_FETCH_MAX_REDIRECTS = 3
 _JD_FETCH_MAX_BYTES = 2_000_000
 _JD_FETCH_FAIL = "Couldn't fetch that page. LinkedIn and many job boards block bots — paste the description text instead."
 
-def _public_host_or_raise(url: str) -> None:
-    """Refuse anything that isn't http(s) on 80/443 to a host whose every DNS
-    answer is a public address. Blocks loopback, private ranges, link-local
-    (cloud metadata at 169.254.169.254), CGNAT, IPv6 ULA and Railway's private
-    network. Remaining gap: a DNS answer that changes between this check and
-    the fetch (rebinding); acceptable for fetching public job pages."""
+# IPv6 ranges that ip.is_global doesn't treat as non-public but which can
+# still route to IPv4 internals: NAT64 (64:ff9b::a9fe:a9fe is 169.254.169.254),
+# IPv4-compatible (::127.0.0.1) and 6to4.
+_EXTRA_BLOCKED_NETS = ("64:ff9b::/96", "64:ff9b:1::/48", "::/96", "2002::/16")
+
+def _resolve_public_or_raise(url: "_httpx.URL") -> str:
+    """Return ONE checked public IP for the URL's host, or raise. The caller
+    connects to that IP, so the address checked is the address used: no DNS
+    rebinding between check and fetch, and no IDNA mismatch (httpx's raw_host
+    is the exact name it would have resolved)."""
     import ipaddress
     import socket
-    from urllib.parse import urlparse
-    try:
-        u = urlparse(url)
-        host = (u.hostname or "").lower().rstrip(".")
-        port = u.port or (443 if u.scheme == "https" else 80)
-    except Exception:
-        raise HTTPException(400, "Invalid URL.")
-    if u.scheme not in ("http", "https") or not host:
+    blocked = [ipaddress.ip_network(n) for n in _EXTRA_BLOCKED_NETS]
+    if url.scheme not in ("http", "https"):
         raise HTTPException(400, "Invalid URL. Use a normal http(s) link.")
+    port = url.port or (443 if url.scheme == "https" else 80)
     if port not in (80, 443):
         raise HTTPException(400, "URL host not allowed.")
-    if host == "localhost" or host.endswith((".local", ".localhost", ".internal", ".railway.internal")):
+    host = url.raw_host.decode("ascii", "replace").lower().rstrip(".").strip("[]")
+    if not host or host == "localhost" or host.endswith((".local", ".localhost", ".internal")):
         raise HTTPException(400, "URL host not allowed.")
     try:
         infos = socket.getaddrinfo(host, port, type=socket.SOCK_STREAM)
@@ -9050,31 +9087,53 @@ def _public_host_or_raise(url: str) -> None:
         raise HTTPException(422, _JD_FETCH_FAIL)
     if not infos:
         raise HTTPException(422, _JD_FETCH_FAIL)
+    chosen = None
     for info in infos:
         ip = ipaddress.ip_address(info[4][0].split("%")[0])
-        if getattr(ip, "ipv4_mapped", None):
-            ip = ip.ipv4_mapped
-        if not ip.is_global or ip.is_multicast:
+        mapped = getattr(ip, "ipv4_mapped", None)
+        check = mapped or ip
+        if (not check.is_global or check.is_multicast
+                or (ip.version == 6 and any(ip in n for n in blocked))):
             log.warning("jd_fetch.blocked host=%s ip=%s", host[:80], ip)
             raise HTTPException(400, "URL host not allowed.")
+        chosen = chosen or str(check)
+    return chosen
+
+def _public_host_or_raise(url: str) -> str:
+    """Validate a URL string (kept for callers/tests); returns the pinned IP."""
+    try:
+        return _resolve_public_or_raise(_httpx.URL(url))
+    except HTTPException:
+        raise
+    except Exception:
+        raise HTTPException(400, "Invalid URL.")
 
 def _fetch_jd_from_url(url: str) -> tuple[str, str]:
     """Best-effort JD fetch. Returns (title, text) or raises HTTPException.
-    Every hop (including redirects) is checked by _public_host_or_raise, and the
-    remote status is never echoed back, so this can't be used to probe or read
-    internal services."""
+    Each hop (including redirects) is resolved once, checked, and then fetched
+    from that exact IP with the original Host header and TLS SNI, so a name
+    can't resolve to a public address for the check and a private one for the
+    request. The remote status is never echoed back."""
     headers = {
         "User-Agent": "Mozilla/5.0 (compatible; FirstDeskBot/0.1; +https://firstdesk.app)",
         "Accept": "text/html,application/xhtml+xml",
     }
-    current = url
     try:
-        with _httpx.Client(follow_redirects=False, timeout=8.0, headers=headers) as client:
+        current = _httpx.URL(url)
+    except Exception:
+        raise HTTPException(400, "Invalid URL.")
+    try:
+        with _httpx.Client(follow_redirects=False, timeout=8.0) as client:
             for _hop in range(_JD_FETCH_MAX_REDIRECTS + 1):
-                _public_host_or_raise(current)
-                with client.stream("GET", current) as r:
+                ip = _resolve_public_or_raise(current)
+                host_hdr = current.raw_host.decode("ascii")
+                if current.port:
+                    host_hdr += f":{current.port}"
+                pinned = current.copy_with(host=ip)
+                with client.stream("GET", pinned, headers={**headers, "Host": host_hdr},
+                                   extensions={"sni_hostname": current.raw_host.decode("ascii")}) as r:
                     if r.is_redirect and r.headers.get("location"):
-                        current = str(r.url.join(r.headers["location"]))
+                        current = current.join(r.headers["location"])
                         continue
                     if r.status_code >= 400:
                         log.info("jd_fetch.http_error status=%s", r.status_code)
@@ -9088,7 +9147,9 @@ def _fetch_jd_from_url(url: str) -> tuple[str, str]:
                     break
             else:
                 raise HTTPException(422, _JD_FETCH_FAIL)
-    except _httpx.HTTPError as ex:
+    except HTTPException:
+        raise
+    except (_httpx.HTTPError, _httpx.InvalidURL, UnicodeError, ValueError) as ex:
         log.warning("jd_fetch.failed kind=%s", type(ex).__name__)
         raise HTTPException(422, _JD_FETCH_FAIL)
     title_m = re.search(r"(?is)<title[^>]*>(.*?)</title>", html)
@@ -9834,26 +9895,31 @@ async def api_task_step(task_id: str, req: TaskStepReq, background: BackgroundTa
     # If all steps are done, auto-complete the task with the standard credit path
     fresh = tasks_col.find_one({"id": task_id, "simulation_id": sim_id()}, {"_id": 0})
     all_done = all(s.get("done") for s in (fresh.get("tool_workflow") or []))
+    blocked_msg = None
     if all_done and fresh.get("status") != "done":
-        completion_credit = max(2, int(fresh["points"] * 0.2))
-        tasks_col.update_one(
-            {"id": task_id, "simulation_id": sim_id()},
-            {"$set": {"status": "done", "review_status": "pending_review",
-                      "completed_at": datetime.utcnow().isoformat(),
-                      "awarded_points": completion_credit}},
-        )
-        sessions_col.update_one(
-            {"session_id": session_id()},
-            {"$addToSet": {"tasks_completed": task_id}, "$inc": {"score_adj": completion_credit}},
-        )
-        emit("task_completed", {"task": fresh})
+        # Same rules as a manual "Complete": the evidence gate applies, and the
+        # completion credit is paid once per task (it used to be paid here and
+        # again on a REST complete after rework, with no evidence check).
+        blocked = _task_complete_block(fresh)
+        if blocked:
+            blocked_msg = blocked[1]
+            all_done_and_completed = False
+        else:
+            outcome, _t, _credit = _mark_task_done(task_id)
+            all_done_and_completed = outcome == "done"
+    else:
+        all_done_and_completed = False
+    if all_done_and_completed:
         emit("task_workflow_completed", {"task": fresh})
         _post_slack_system(primary_ch, "FirstDesk Workflow",
                            f"[{task_id}] all {len(workflow)} steps complete — handed to manager for review.")
         _queue_manager_review(background, user_id() or "")
 
-    return {"ok": True, "task": tasks_col.find_one({"id": task_id, "simulation_id": sim_id()}, {"_id": 0}),
-            "all_steps_done": all_done}
+    out = {"ok": True, "task": tasks_col.find_one({"id": task_id, "simulation_id": sim_id()}, {"_id": 0}),
+           "all_steps_done": all_done}
+    if blocked_msg:
+        out["blocked"] = blocked_msg
+    return out
 
 # Mirror of scenario_engine.DEFAULT_SLACK_CHANNELS so handlers don't import it.
 DEFAULT_SLACK_CHANNELS_BY_CAREER: dict = {
@@ -10185,8 +10251,10 @@ async def interview_voice_ws(ws: WebSocket):
     qp = ws.query_params
     token = (qp.get("token") or "").strip()
     user_id = _verify_token(token) if token else None
-    if user_id and _token_revoked(users_col.find_one({"user_id": user_id}, {"password_changed_at": 1}), token):
-        user_id = None
+    if user_id:
+        _ws_user = users_col.find_one({"user_id": user_id}, {"password_changed_at": 1})
+        if _ws_user is None or _token_revoked(_ws_user, token):  # deleted account or revoked token
+            user_id = None
     if not user_id:
         await ws.close(code=1008)
         return

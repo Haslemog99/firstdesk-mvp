@@ -18,6 +18,8 @@ os.environ.setdefault("FIREWORKS_API_KEY", "offline-test-key")
 os.environ.setdefault("AUTH_SECRET", "offline-test-secret-offline-test-secret")
 os.environ["FIRSTDESK_SKIP_LLM_PROBE"] = "1"
 os.environ["GLOBAL_API_LIMIT"] = "100000"
+os.environ["SIGNUP_PER_IP_HOURLY"] = "100000"
+os.environ["GUEST_PER_IP_HOURLY"] = "100000"
 os.environ.pop("LANGSMITH_API_KEY", None)
 os.environ.pop("LANGCHAIN_API_KEY", None)
 
