@@ -1,0 +1,895 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>FirstDesk — Your first job, before your first job</title>
+<meta name="description" content="FirstDesk is an AI workplace simulator. Practise a real first day — an Outlook-style inbox, Slack-style chat, role tools, deadlines, and AI coworkers — and get scored on the skills that matter at work.">
+<meta name="robots" content="index, follow">
+<meta name="theme-color" content="#09090b">
+<link rel="canonical" href="{{ORIGIN}}/">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="FirstDesk">
+<meta property="og:locale" content="en_GB">
+<meta property="og:title" content="FirstDesk — Your first job, before your first job">
+<meta property="og:description" content="Practise a real first day at work. Inbox, chat, tools, deadlines, and AI coworkers — then a score across the skills that matter on the job.">
+<meta property="og:url" content="{{ORIGIN}}/">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:title" content="FirstDesk — Your first job, before your first job">
+<meta name="twitter:description" content="An AI workplace simulator. Work a first day, then get scored on task execution, communication, prioritisation, independence, judgment, and speed.">
+<link rel="icon" href="data:image/svg+xml;utf8,&lt;svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'&gt;&lt;rect width='32' height='32' rx='7' fill='%232563EB'/&gt;&lt;text x='16' y='21' font-family='Georgia' font-size='16' font-weight='700' fill='white' text-anchor='middle'&gt;F&lt;/text&gt;&lt;/svg&gt;">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "SoftwareApplication",
+  "name": "FirstDesk",
+  "applicationCategory": "EducationalApplication",
+  "operatingSystem": "Web",
+  "description": "AI workplace simulator where you practise a first day on the job and get scored on task execution, communication, prioritisation, independence, pushback and judgment, and speed.",
+  "url": "{{ORIGIN}}/"
+}
+</script>
+<script>
+(function () {
+  var path = location.pathname.replace(/\/+$/, "") || "/";
+  if (path !== "/") return;
+  try {
+    if (localStorage.getItem("fdToken")) location.replace("/?app=1");
+  } catch (e) {}
+})();
+</script>
+<style>
+:root {
+  --bg: #09090b;
+  --bg-2: #101012;
+  --paper: #f4f2ec;
+  --paper-2: #ebe7de;
+  --ink: #fafaf9;
+  --ink-soft: #d4d4d8;
+  --muted: #a1a1aa;
+  --ink-dark: #18181b;
+  --muted-dark: #3f3f46;
+  --line: rgba(255, 255, 255, 0.1);
+  --line-strong: rgba(255, 255, 255, 0.16);
+  --line-dark: rgba(24, 24, 27, 0.12);
+  --blue: #2563eb;
+  --blue-deep: #1d4ed8;
+  --cream: #fafaf9;
+  --serif: "Instrument Serif", Georgia, "Times New Roman", serif;
+  --sans: Inter, "Segoe UI", system-ui, sans-serif;
+  --max: 1120px;
+  --header: 72px;
+  --shadow: 0 24px 60px rgba(0, 0, 0, 0.35);
+}
+*, *::before, *::after { box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--sans);
+  font-size: 16px;
+  line-height: 1.6;
+  letter-spacing: -0.011em;
+  -webkit-font-smoothing: antialiased;
+}
+img { max-width: 100%; }
+a { color: inherit; }
+button, input { font: inherit; }
+:focus-visible {
+  outline: 2px solid #93c5fd;
+  outline-offset: 3px;
+}
+.skip {
+  position: absolute;
+  left: 16px;
+  top: -40px;
+  background: var(--cream);
+  color: var(--ink-dark);
+  padding: 8px 12px;
+  border-radius: 8px;
+  z-index: 20;
+}
+.skip:focus { top: 12px; }
+.wrap { width: min(var(--max), calc(100% - 40px)); margin: 0 auto; }
+.site-header {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  height: var(--header);
+  display: flex;
+  align-items: center;
+  backdrop-filter: blur(16px);
+  background: rgba(9, 9, 11, 0.82);
+  border-bottom: 1px solid var(--line);
+}
+.site-header .wrap {
+  display: flex;
+  align-items: center;
+  gap: 28px;
+  width: min(var(--max), calc(100% - 40px));
+}
+.brand {
+  font-weight: 500;
+  font-size: 17px;
+  letter-spacing: -0.02em;
+  text-decoration: none;
+  margin-right: auto;
+}
+.brand em {
+  font-family: var(--serif);
+  font-style: italic;
+  font-weight: 400;
+  font-size: 20px;
+}
+.site-nav { display: flex; align-items: center; gap: 22px; }
+.site-nav a {
+  color: var(--ink-soft);
+  text-decoration: none;
+  font-size: 14px;
+  font-weight: 500;
+}
+.site-nav a:hover { color: var(--ink); }
+.header-actions { display: flex; align-items: center; gap: 8px; }
+.nav-toggle {
+  display: none;
+  background: transparent;
+  color: var(--ink);
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  padding: 8px 14px;
+  cursor: pointer;
+}
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 44px;
+  padding: 0 18px;
+  border-radius: 999px;
+  text-decoration: none;
+  font-weight: 600;
+  font-size: 14px;
+  letter-spacing: -0.01em;
+  border: 1px solid transparent;
+}
+.btn-cream { background: var(--cream); color: var(--ink-dark); }
+.btn-cream:hover { background: #fff; }
+.btn-ghost {
+  background: transparent;
+  color: var(--ink);
+  border-color: var(--line-strong);
+}
+.btn-ghost:hover { background: rgba(255, 255, 255, 0.05); }
+.btn-blue { background: var(--blue); color: #fff; }
+.btn-blue:hover { background: var(--blue-deep); }
+.btn-dark { background: var(--ink-dark); color: var(--cream); }
+.btn-dark:hover { background: #000; }
+.hero {
+  position: relative;
+  padding: 72px 0 88px;
+  background-image:
+    linear-gradient(to right, rgba(255,255,255,0.04) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(255,255,255,0.04) 1px, transparent 1px);
+  background-size: 56px 56px;
+  background-position: center top;
+}
+.hero::after {
+  content: "";
+  position: absolute;
+  inset: auto 0 0 0;
+  height: 120px;
+  background: linear-gradient(to bottom, transparent, var(--bg));
+  pointer-events: none;
+}
+.hero-grid {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  grid-template-columns: minmax(0, 1.05fr) minmax(0, 0.95fr);
+  gap: 56px;
+  align-items: center;
+}
+.eyebrow {
+  margin: 0 0 18px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+h1, h2, h3 { font-weight: 500; letter-spacing: -0.03em; }
+h1 {
+  margin: 0 0 18px;
+  font-size: clamp(46px, 5.6vw, 76px);
+  line-height: 0.98;
+  font-weight: 500;
+}
+h1 em, h2 em {
+  font-family: var(--serif);
+  font-style: italic;
+  font-weight: 400;
+}
+.lede {
+  margin: 0 0 28px;
+  max-width: 38rem;
+  color: var(--ink-soft);
+  font-size: 18px;
+  line-height: 1.55;
+}
+.cta-row { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 28px; }
+.stat-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 18px 28px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.stat-row li { min-width: 120px; }
+.stat-row strong {
+  display: block;
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+}
+.stat-row span { color: var(--muted); font-size: 13px; }
+.desk {
+  margin: 0;
+  background: #161618;
+  border: 1px solid var(--line-strong);
+  border-radius: 16px;
+  box-shadow: var(--shadow);
+  overflow: hidden;
+}
+.desk-top {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 12px;
+}
+.dots { display: flex; gap: 5px; }
+.dots i {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #3f3f46;
+  display: block;
+}
+.dots i:first-child { background: #ef4444; }
+.dots i:nth-child(2) { background: #eab308; }
+.dots i:nth-child(3) { background: #22c55e; }
+.desk-top strong { color: var(--ink-soft); font-weight: 600; }
+.desk-clock { margin-left: auto; font-variant-numeric: tabular-nums; }
+.desk-body { display: grid; grid-template-columns: 1.4fr 0.9fr; min-height: 280px; }
+.mail { border-right: 1px solid var(--line); }
+.mail-row, .side-row {
+  display: grid;
+  gap: 2px;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--line);
+}
+.mail-row small, .side-row small { color: var(--muted); font-size: 11px; }
+.mail-row b, .side-row b { font-size: 13px; font-weight: 600; letter-spacing: -0.01em; }
+.mail-row span, .side-row span { color: var(--ink-soft); font-size: 12.5px; }
+.prio {
+  justify-self: start;
+  margin-top: 4px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  color: #fecaca;
+  background: rgba(220, 38, 38, 0.18);
+  border-radius: 999px;
+  padding: 2px 7px;
+}
+.side-head {
+  padding: 10px 14px 4px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.desk figcaption {
+  margin: 0;
+  padding: 10px 14px 12px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
+  background: #121214;
+}
+.section { padding: 88px 0; }
+.section h2 {
+  margin: 0 0 12px;
+  font-size: clamp(32px, 4vw, 48px);
+  line-height: 1.05;
+}
+.section-intro {
+  margin: 0 0 40px;
+  max-width: 40rem;
+  color: var(--muted);
+  font-size: 17px;
+}
+.paper { background: var(--paper); color: var(--ink-dark); }
+.paper .section-intro, .paper .muted { color: var(--muted-dark); }
+.steps {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 22px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.step {
+  padding: 22px 22px 8px;
+  border-top: 1px solid var(--line-dark);
+}
+.step-num {
+  font-family: var(--serif);
+  font-style: italic;
+  font-size: 28px;
+  color: var(--blue);
+}
+.step h3 { margin: 8px 0 8px; font-size: 22px; }
+.step p { margin: 0 0 16px; color: var(--muted-dark); }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 8px; padding: 0; list-style: none; }
+.chips li {
+  font-size: 12px;
+  font-weight: 600;
+  padding: 4px 8px;
+  border-radius: 999px;
+  background: var(--paper-2);
+  color: var(--ink-dark);
+}
+.feature-layout {
+  display: grid;
+  grid-template-columns: 1.15fr 0.85fr;
+  gap: 36px;
+  align-items: start;
+}
+.feature-list { margin: 0; padding: 0; list-style: none; }
+.feature-list li {
+  padding: 16px 0;
+  border-top: 1px solid var(--line-dark);
+}
+.feature-list h3 { margin: 0 0 4px; font-size: 17px; }
+.feature-list p { margin: 0; color: var(--muted-dark); font-size: 15px; }
+.scorecard {
+  background: #fff;
+  border: 1px solid var(--line-dark);
+  border-radius: 16px;
+  padding: 22px 22px 18px;
+  box-shadow: 0 10px 30px rgba(24, 24, 27, 0.05);
+}
+.nav-signin { display: none; }
+.scorecard h3 { margin: 0 0 4px; font-size: 20px; }
+.scorecard .total {
+  margin: 0 0 16px;
+  color: var(--muted-dark);
+  font-size: 13px;
+}
+.bar-row { display: grid; grid-template-columns: 1fr auto; gap: 4px 12px; margin-bottom: 12px; font-size: 13px; }
+.bar-row span:last-child { font-variant-numeric: tabular-nums; font-weight: 600; }
+.track { grid-column: 1 / -1; height: 6px; background: var(--paper-2); border-radius: 99px; overflow: hidden; }
+.track i { display: block; height: 100%; background: var(--blue); border-radius: 99px; }
+.score-note { margin: 8px 0 0; color: var(--muted-dark); font-size: 12.5px; }
+.careers { background: var(--bg-2); }
+.career-note {
+  margin: -24px 0 28px;
+  color: var(--ink-soft);
+  font-size: 15px;
+  max-width: 46rem;
+}
+.career-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1px;
+  background: var(--line);
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  overflow: hidden;
+}
+.career {
+  background: var(--bg);
+  padding: 26px 26px 22px;
+  min-height: 220px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.career .kicker {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+}
+.career h3 { margin: 0; font-size: 22px; }
+.career .co { margin: 0; color: var(--muted); font-size: 13px; }
+.career p { margin: 4px 0 0; color: var(--ink-soft); font-size: 14.5px; flex: 1; }
+.tools { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.tools span {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--ink-soft);
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  padding: 3px 8px;
+}
+.badge {
+  align-self: flex-start;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #bfdbfe;
+  background: rgba(37, 99, 235, 0.18);
+  border-radius: 999px;
+  padding: 3px 8px;
+}
+.badge.authored { color: var(--ink-soft); background: rgba(255,255,255,0.06); }
+.who-grid, .faq-list { display: grid; gap: 18px; }
+.who-grid { grid-template-columns: repeat(3, 1fr); }
+.who-card, details {
+  background: #fff;
+  border: 1px solid var(--line-dark);
+  border-radius: 14px;
+  padding: 22px;
+}
+.who-card h3 { margin: 0 0 8px; font-size: 22px; }
+.who-card p { margin: 0; color: var(--muted-dark); }
+details { padding: 0; }
+summary {
+  cursor: pointer;
+  list-style: none;
+  padding: 18px 22px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+}
+summary::-webkit-details-marker { display: none; }
+summary::after {
+  content: "+";
+  float: right;
+  color: var(--muted-dark);
+  font-weight: 500;
+}
+details[open] summary::after { content: "–"; }
+details p { margin: 0; padding: 0 22px 18px; color: var(--muted-dark); }
+.placeholder {
+  margin-top: 10px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: #fff7ed;
+  color: #9a3412;
+  font-size: 14px;
+}
+.close {
+  padding: 72px 0;
+  border-top: 1px solid var(--line);
+}
+.close-box {
+  display: flex;
+  justify-content: space-between;
+  align-items: end;
+  gap: 24px;
+}
+.close h2 { margin: 0 0 8px; font-size: clamp(32px, 4vw, 48px); }
+.close p { margin: 0; color: var(--muted); max-width: 36rem; }
+.site-footer {
+  border-top: 1px solid var(--line);
+  padding: 28px 0 40px;
+  color: var(--muted);
+  font-size: 13px;
+}
+.foot-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 18px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+.foot-links { display: flex; gap: 16px; flex-wrap: wrap; }
+.foot-links a { color: var(--ink-soft); text-decoration: none; }
+.foot-links a:hover { color: var(--ink); }
+@media (min-width: 961px) {
+  .scorecard { position: sticky; top: 96px; }
+}
+@media (max-width: 960px) {
+  .hero-grid, .feature-layout, .who-grid, .steps { grid-template-columns: 1fr; }
+  .career-grid { grid-template-columns: 1fr; }
+  .close-box { flex-direction: column; align-items: flex-start; }
+  .desk-body { grid-template-columns: 1fr; }
+  .mail { border-right: 0; border-bottom: 1px solid var(--line); }
+}
+@media (max-width: 800px) {
+  .nav-toggle { display: inline-flex; }
+  .site-nav {
+    display: none;
+    position: fixed;
+    top: var(--header);
+    left: 0;
+    right: 0;
+    z-index: 20;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0;
+    padding: 8px 20px 16px;
+    background: #09090b;
+    border-bottom: 1px solid var(--line);
+    box-shadow: 0 18px 40px rgba(0, 0, 0, 0.45);
+  }
+  .site-nav.is-open { display: flex; }
+  .site-nav a { padding: 12px 0; width: 100%; }
+  .header-signin { display: none; }
+  .nav-signin { display: block; color: var(--ink); font-weight: 600; }
+  .desk-company { display: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+  *, *::before, *::after {
+    animation: none !important;
+    transition: none !important;
+  }
+}
+</style>
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<header class="site-header">
+  <div class="wrap">
+    <a class="brand" href="/">First<em>Desk</em></a>
+    <nav id="siteNav" class="site-nav" aria-label="On this page">
+      <a href="#how">How it works</a>
+      <a href="#features">Features</a>
+      <a href="#careers">Careers</a>
+      <a href="#who">Who it's for</a>
+      <a href="#faq">FAQ</a>
+      <a class="nav-signin" href="/?app=1">Sign in</a>
+    </nav>
+    <div class="header-actions">
+      <a class="btn btn-ghost header-signin" href="/?app=1">Sign in</a>
+      <a class="btn btn-cream" href="/?app=1&amp;mode=signup">Get started</a>
+      <button type="button" class="nav-toggle" id="navToggle" aria-expanded="false" aria-controls="siteNav">Menu</button>
+    </div>
+  </div>
+</header>
+
+<main id="main">
+  <section class="hero">
+    <div class="wrap hero-grid">
+      <div>
+        <p class="eyebrow">AI workplace simulator</p>
+        <h1>Your <em>first</em> job,<br>before your first job.</h1>
+        <p class="lede">Practise a real first day — an Outlook-style inbox, Slack-style chat, the tools of the role, deadlines, and AI coworkers — and get scored on the dimensions that actually matter at work.</p>
+        <div class="cta-row">
+          <a class="btn btn-cream" href="/?app=1&amp;mode=signup">Get started</a>
+          <a class="btn btn-ghost" href="/?app=1">Sign in</a>
+        </div>
+        <ul class="stat-row">
+          <li><strong>8 career tracks</strong><span>Five simulated days each</span></li>
+          <li><strong>09:00–17:00</strong><span>One office day on the clock</span></li>
+          <li><strong>Score out of 100</strong><span>Six fixed dimensions</span></li>
+        </ul>
+      </div>
+      <figure class="desk">
+        <div class="desk-top">
+          <span class="dots" aria-hidden="true"><i></i><i></i><i></i></span>
+          <strong>Outlook — Inbox</strong>
+          <span class="desk-company">Apex Financial · Day 1</span>
+          <span class="desk-clock">09:14</span>
+        </div>
+        <div class="desk-body">
+          <div class="mail">
+            <div class="mail-row">
+              <small>Sarah Mitchell · Finance Manager · 09:00</small>
+              <b>Welcome! Your first task</b>
+              <span>Reconcile the March bank statement against the ledger.</span>
+              <em class="prio">HIGH</em>
+            </div>
+            <div class="mail-row">
+              <small>James Crawford · Client · 09:30</small>
+              <b>Invoice #4821 — amount mismatch</b>
+              <span>The invoice and the purchase order do not agree.</span>
+              <em class="prio">HIGH</em>
+            </div>
+            <div class="mail-row">
+              <small>HR · 08:45</small>
+              <b>Onboarding — complete by lunch</b>
+              <span>Handbook, emergency contact, IT policy, email signature.</span>
+            </div>
+          </div>
+          <div>
+            <div class="side-head">Slack · #finance</div>
+            <div class="side-row">
+              <small>Teammate</small>
+              <span>Check the £600 line on the Crawford invoice before you reply.</span>
+            </div>
+            <div class="side-head">Tasks</div>
+            <div class="side-row">
+              <b>Reconcile March bank statement</b>
+              <small>Due 17:00 · High</small>
+            </div>
+            <div class="side-row">
+              <b>Respond to the client invoice query</b>
+              <small>Due 14:00 · High</small>
+            </div>
+          </div>
+        </div>
+        <figcaption>Illustrative day-1 desk from the built-in Junior Accountant simulation at Apex Financial. Not a customer result.</figcaption>
+      </figure>
+    </div>
+  </section>
+
+  <section class="section paper" id="how">
+    <div class="wrap">
+      <p class="eyebrow" style="color:#2563eb">How it works</p>
+      <h2>Three steps. Then the day starts.</h2>
+      <p class="section-intro">You sign in, pick the work, and spend a compressed office day at the desk. The simulator keeps the inbox, the tasks, and the score.</p>
+      <ol class="steps">
+        <li class="step">
+          <div class="step-num">01</div>
+          <h3>Choose the work</h3>
+          <p>Pick one of eight career tracks, or paste a public job listing or the description itself. Then say how familiar you are. The job stays the same. Time, explanations, and how hard mistakes bite do not.</p>
+          <ul class="chips">
+            <li>Beginner · 2h 30m</li>
+            <li>Studied · 2h 00m</li>
+            <li>Experienced · 1h 30m</li>
+          </ul>
+        </li>
+        <li class="step">
+          <div class="step-num">02</div>
+          <h3>Work the day</h3>
+          <p>The desk clock runs 09:00 to 17:00. Read the inbox, answer in Slack, use the role’s tools, and show up to a timed meeting. Coworkers move deadlines. IT outages and tool downtime can interrupt you. The clock pauses after three minutes without an action.</p>
+        </li>
+        <li class="step">
+          <div class="step-num">03</div>
+          <h3>Read the score</h3>
+          <p>End the day for a review out of 100, a letter grade, and manager notes. Come back for the next day. Each track runs five simulated days, and a registered account keeps your best score per career.</p>
+        </li>
+      </ol>
+    </div>
+  </section>
+
+  <section class="section paper" id="features" style="padding-top:0">
+    <div class="wrap">
+      <p class="eyebrow" style="color:#2563eb">Features</p>
+      <h2>A desk, not a quiz.</h2>
+      <p class="section-intro">Everything below is in the simulator today. Outlook, Slack, and the role tools are in-simulation. They do not connect to a real mailbox or workspace.</p>
+      <div class="feature-layout">
+        <ul class="feature-list">
+          <li>
+            <h3>Outlook-style inbox</h3>
+            <p>Read, reply, forward, Cc and Bcc, and file mail into folders. High-priority messages are marked. Actionable mail is part of the score.</p>
+          </li>
+          <li>
+            <h3>Slack-style chat</h3>
+            <p>Channels follow the career — #finance, #soc-alerts, #incidents, #marketing, #partnerships, #engineering — plus #general. You can read and post.</p>
+          </li>
+          <li>
+            <h3>The tools of the role</h3>
+            <p>Sage and sheets, a SIEM and Jira, campaigns and analytics, CI, purchase orders, an LMS, a roadmap, a risk register. Tasks, an HR checklist, training, IT setup, and files sit alongside them.</p>
+          </li>
+          <li>
+            <h3>AI coworkers</h3>
+            <p>A manager, a client, a teammate, IT, HR, and a director. They email you and each other. You see the thread when you are copied. On harder settings they stop explaining and let a mistake land.</p>
+          </li>
+          <li>
+            <h3>Consequences</h3>
+            <p>Actions ripple. A wrong ledger entry, a false escalation, or a late client reply can come back as mail, a Slack message, and a note on your conduct standing.</p>
+          </li>
+          <li>
+            <h3>Your own job description</h3>
+            <p>Paste a Greenhouse, Lever, Workable, Ashby, Indeed, Reed, or Wellfound URL, or the text. The scenario engine writes a fresh day for accounting, cybersecurity, marketing, and software roles.</p>
+          </li>
+          <li>
+            <h3>Interview practice</h3>
+            <p>A separate multi-round mock interview scores content, delivery, and confidence. One mode runs after a simulation and asks you to defend the day you just worked. It is marked Pro inside the app.</p>
+          </li>
+        </ul>
+        <aside class="scorecard" aria-labelledby="score-title">
+          <h3 id="score-title">End-of-day scorecard</h3>
+          <p class="total">Fixed weights. Totals 100. This is the rubric, not someone’s result.</p>
+          <div class="bar-row"><span>Task execution</span><span>25</span><div class="track"><i style="width:100%"></i></div></div>
+          <div class="bar-row"><span>Communication</span><span>20</span><div class="track"><i style="width:80%"></i></div></div>
+          <div class="bar-row"><span>Prioritisation</span><span>20</span><div class="track"><i style="width:80%"></i></div></div>
+          <div class="bar-row"><span>Independence</span><span>15</span><div class="track"><i style="width:60%"></i></div></div>
+          <div class="bar-row"><span>Pushback &amp; judgment</span><span>10</span><div class="track"><i style="width:40%"></i></div></div>
+          <div class="bar-row"><span>Speed &amp; efficiency</span><span>10</span><div class="track"><i style="width:40%"></i></div></div>
+          <p class="score-note">Grades run from A+ (Exceptional) down to D (Not Yet Ready). A behavioural record — what you opened, in what order, and where you hesitated — is stored with the review.</p>
+        </aside>
+      </div>
+    </div>
+  </section>
+
+  <section class="section careers" id="careers">
+    <div class="wrap">
+      <p class="eyebrow">Supported careers</p>
+      <h2>Eight tracks. Four the engine can write.</h2>
+      <p class="section-intro">Every track is a five-day simulation you can start from the app. Accountant, cybersecurity, marketing, and developer are also the careers in the scenario engine: paste a job description and it generates a new day for those four.</p>
+      <p class="career-note">The other four tracks ship as authored days. Auto-detect on a pasted listing maps the role onto one of the eight.</p>
+      <div class="career-grid">
+        <article class="career">
+          <span class="badge">Scenario engine</span>
+          <div class="kicker">01 — Finance</div>
+          <h3>Junior Accountant</h3>
+          <p class="co">Apex Financial Ltd</p>
+          <p>Reconcile the bank statement, chase an invoice that does not match its purchase order, and answer a VAT query before the senior accountant does.</p>
+          <div class="tools"><span>Outlook</span><span>Sage</span><span>Sheets</span><span>Tasks</span><span>Slack</span></div>
+        </article>
+        <article class="career">
+          <span class="badge">Scenario engine</span>
+          <div class="kicker">02 — Security</div>
+          <h3>Junior Cybersecurity Analyst</h3>
+          <p class="co">ShieldWall Security</p>
+          <p>Triage overnight SIEM alerts, investigate a reported breach, and handle a phishing wave. Real threats sit among false positives.</p>
+          <div class="tools"><span>Outlook</span><span>SIEM</span><span>Jira</span><span>Tasks</span><span>Slack</span></div>
+        </article>
+        <article class="career">
+          <span class="badge">Scenario engine</span>
+          <div class="kicker">03 — Marketing</div>
+          <h3>Junior Marketing Coordinator</h3>
+          <p class="co">BrightPath Agency</p>
+          <p>Run a product launch while the client rewrites the brief and a teammate pushes back. The deadline does not move just because the brief did.</p>
+          <div class="tools"><span>Outlook</span><span>Campaigns</span><span>Analytics</span><span>Tasks</span><span>Slack</span></div>
+        </article>
+        <article class="career">
+          <span class="badge">Scenario engine</span>
+          <div class="kicker">04 — Engineering</div>
+          <h3>Junior Software Developer</h3>
+          <p class="co">CodeCraft Labs</p>
+          <p>Ship bug fixes, survive a code review, and answer a production incident. CI status is part of the desk.</p>
+          <div class="tools"><span>Outlook</span><span>Jira</span><span>CI</span><span>Tasks</span><span>Slack</span></div>
+        </article>
+        <article class="career">
+          <span class="badge authored">Authored days</span>
+          <div class="kicker">05 — IT Procurement</div>
+          <h3>Junior IT Procurement Specialist</h3>
+          <p class="co">TechStack Procurement Ltd</p>
+          <p>A backdated purchase order, a renewal to renegotiate, and a security tool that needs unblocking — on day one.</p>
+          <div class="tools"><span>Outlook</span><span>Purchase orders</span><span>Vendors</span><span>Tasks</span><span>Slack</span></div>
+        </article>
+        <article class="career">
+          <span class="badge authored">Authored days</span>
+          <div class="kicker">06 — Learning &amp; Development</div>
+          <h3>Junior L&amp;D Specialist</h3>
+          <p class="co">Helix People Co.</p>
+          <p>A broken onboarding module mid-cohort, compliance training that has stalled, and a request the calendar cannot honestly accept.</p>
+          <div class="tools"><span>Outlook</span><span>LMS</span><span>Pipeline</span><span>Tasks</span><span>Slack</span></div>
+        </article>
+        <article class="career">
+          <span class="badge authored">Authored days</span>
+          <div class="kicker">07 — Product</div>
+          <h3>Junior Growth Product Manager</h3>
+          <p class="co">Northwind Cloud</p>
+          <p>An A/B test that is not what the celebration says, a Q2 call to surface, and stakeholders asking for roadmap commits.</p>
+          <div class="tools"><span>Outlook</span><span>Roadmap</span><span>Requests</span><span>Tasks</span><span>Slack</span></div>
+        </article>
+        <article class="career">
+          <span class="badge authored">Authored days</span>
+          <div class="kicker">08 — Governance, Risk &amp; Compliance</div>
+          <h3>Junior GRC Analyst</h3>
+          <p class="co">Halcyon Health</p>
+          <p>SOC 2 fieldwork is close. Clean a risk register, refuse to mark a control implemented without evidence, and answer a questionnaire honestly.</p>
+          <div class="tools"><span>Outlook</span><span>Risk register</span><span>Controls</span><span>Tasks</span><span>Slack</span></div>
+        </article>
+      </div>
+    </div>
+  </section>
+
+  <section class="section paper" id="who">
+    <div class="wrap">
+      <p class="eyebrow" style="color:#2563eb">Who it’s for</p>
+      <h2>People about to be new.</h2>
+      <p class="section-intro">The same desk, three reasons to sit at it.</p>
+      <div class="who-grid">
+        <article class="who-card">
+          <h3>Graduates</h3>
+          <p>Beginner mode is built for a first job you have not done yet. You get a study guide, hints, and tool explainers. Colleagues warn you before a serious mistake, the first slip on each tool is free, and the office day takes two and a half hours of real time.</p>
+        </article>
+        <article class="who-card">
+          <h3>Career changers</h3>
+          <p>Start a track you have not worked, or paste a description of the role you are moving toward. Studied mode assumes the theory and scores you straight. Experienced mode drops the explanations and makes penalties one and a half times as sharp.</p>
+        </article>
+        <article class="who-card">
+          <h3>Job seekers</h3>
+          <p>Paste the listing you are applying to. For accounting, cybersecurity, marketing, and software roles, the scenario engine builds a day from it. Interview practice, marked Pro in the app, can follow so you talk through what you actually did.</p>
+        </article>
+      </div>
+    </div>
+  </section>
+
+  <section class="section paper" id="faq" style="padding-top:0">
+    <div class="wrap">
+      <p class="eyebrow" style="color:#2563eb">FAQ</p>
+      <h2>Short answers.</h2>
+      <div class="faq-list" style="margin-top:28px">
+        <details>
+          <summary>How long is a simulated day?</summary>
+          <p>On the desk, the day runs from 09:00 to 17:00. In real time that is 2 hours 30 minutes on beginner, 2 hours on studied, and 1 hour 30 minutes on experienced. If you leave the tab idle for three minutes, the clock pauses instead of burning the day.</p>
+        </details>
+        <details>
+          <summary>What am I scored on?</summary>
+          <p>Task execution (25), communication (20), prioritisation (20), independence (15), pushback and judgment (10), and speed and efficiency (10). The total is out of 100, with a letter grade from A+ to D and notes from the manager. Registered accounts also see an employability figure on the dashboard, taken from the best simulation score and, if you have done one, the best interview score.</p>
+        </details>
+        <details>
+          <summary>Which careers can be generated from a job description?</summary>
+          <p>The scenario engine’s careers are accountant, cybersecurity, marketing, and developer. Those four have a tool palette the generator is allowed to use. Procurement, learning and development, product management, and GRC are full five-day simulations you start from the career list. A pasted listing can be auto-classified onto any of the eight tracks; generation of a new day only proceeds when the track has a palette.</p>
+        </details>
+        <details>
+          <summary>Do I need an account?</summary>
+          <p>You can try a day as a guest from the sign-in screen. Guest progress is not saved permanently. An account keeps your simulation, your scores, and a way back into an unfinished day. You can delete the account and its data from the dashboard.</p>
+        </details>
+        <details>
+          <summary>Does this connect to my real email or Slack?</summary>
+          <p>No. The inbox, chat, and role tools are simulated. Messages stay inside your FirstDesk session. Password reset is the only email the app sends, and only for your own account.</p>
+        </details>
+        <details>
+          <summary>What does interview practice cost?</summary>
+          <p>Mock interviews and the simulate-then-interview path are marked Pro inside the app. They score content, delivery, and confidence across rounds.</p>
+          <p class="placeholder" style="margin:0 22px 18px">Pricing placeholder — the product does not publish a price. Nothing on this page is a fee, plan, or offer.</p>
+        </details>
+        <details>
+          <summary>Can I stop halfway?</summary>
+          <p>A registered session remembers the career, the day, and the difficulty. The dashboard offers to continue an in-progress day. Signing out and back in returns you to that desk rather than wiping it.</p>
+        </details>
+      </div>
+    </div>
+  </section>
+
+  <section class="close">
+    <div class="wrap close-box">
+      <div>
+        <h2>Start day one.</h2>
+        <p>Create an account, or sign in and pick a track. The first thing you will do is open the inbox.</p>
+      </div>
+      <div class="cta-row">
+        <a class="btn btn-cream" href="/?app=1&amp;mode=signup">Get started</a>
+        <a class="btn btn-ghost" href="/?app=1">Sign in</a>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer class="site-footer">
+  <div class="wrap foot-row">
+    <div>First<em style="font-family:var(--serif)">Desk</em> · Proprietary — all rights reserved.</div>
+    <nav class="foot-links" aria-label="Footer">
+      <a href="#how">How it works</a>
+      <a href="#careers">Careers</a>
+      <a href="#faq">FAQ</a>
+      <a href="/?app=1">Sign in</a>
+      <a href="/?app=1&amp;mode=signup">Get started</a>
+    </nav>
+  </div>
+</footer>
+<script>
+(function () {
+  var btn = document.getElementById("navToggle");
+  var nav = document.getElementById("siteNav");
+  if (!btn || !nav) return;
+  function setOpen(open) {
+    nav.classList.toggle("is-open", open);
+    btn.setAttribute("aria-expanded", open ? "true" : "false");
+    btn.textContent = open ? "Close" : "Menu";
+  }
+  btn.addEventListener("click", function () {
+    setOpen(btn.getAttribute("aria-expanded") !== "true");
+  });
+  nav.addEventListener("click", function (e) {
+    if (e.target.closest("a")) setOpen(false);
+  });
+  document.addEventListener("keydown", function (e) {
+    if (e.key === "Escape") setOpen(false);
+  });
+})();
+</script>
+</body>
+</html>
