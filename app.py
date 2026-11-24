@@ -15,8 +15,9 @@ import os, json, uuid, hashlib, hmac, base64, secrets, time, re, random
 import logging
 import contextvars
 import asyncio
+import threading
 from collections import defaultdict, deque
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from contextlib import asynccontextmanager
 from html import escape as _html_escape
 from typing import Annotated, Any, Optional
@@ -27,7 +28,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, BeforeValidator, Field, field_validator
-from pymongo import MongoClient
+from pymongo import MongoClient, ReturnDocument
 from pymongo.errors import PyMongoError
 
 # ── STRUCTURED LOGGING ────────────────────────────────────────────
@@ -392,15 +393,79 @@ _RATE_WINDOW_SEC = 60
 _RATE_LIMIT = 20  # messages per minute per IP
 _RATE_STALE_SEC = 300  # drop an IP's rate entry after 5 minutes idle
 
+def _trusted_proxy_hops() -> int:
+    """How many reverse proxies sit in front of this process.
+
+    The leftmost X-Forwarded-For entry is chosen by the client. Only the hop
+    appended by a proxy we actually trust is a client address. Unset: one hop
+    on Railway (its edge proxy), otherwise none — the socket peer.
+    """
+    raw = os.environ.get("TRUSTED_PROXY_HOPS")
+    if raw is None or raw.strip() == "":
+        if os.environ.get("RAILWAY_ENVIRONMENT") or os.environ.get("RAILWAY_PUBLIC_DOMAIN"):
+            return 1
+        return 0
+    try:
+        return max(0, int(raw))
+    except ValueError:
+        return 0
+
 def _client_ip(request: Request) -> str:
-    """Best-effort client IP. Honours common proxy headers when present."""
-    fwd = request.headers.get("x-forwarded-for")
-    if fwd:
-        return fwd.split(",")[0].strip()
-    real = request.headers.get("x-real-ip")
-    if real:
-        return real.strip()
-    return request.client.host if request.client else "unknown"
+    """Address used for rate limits.
+
+    Never the first X-Forwarded-For hop: a client can put any address there
+    and walk around a per-IP limit. Use the socket peer, or, when
+    TRUSTED_PROXY_HOPS is set, that many entries from the right (the hop the
+    trusted proxy appended).
+    """
+    peer = request.client.host if request.client else "unknown"
+    hops = _trusted_proxy_hops()
+    if hops <= 0:
+        return peer
+    parts = [p.strip() for p in (request.headers.get("x-forwarded-for") or "").split(",") if p.strip()]
+    if len(parts) < hops:
+        return peer
+    return parts[-hops]
+
+# Failed sign-ins, per email, so rotating X-Forwarded-For cannot reset the
+# counter. Recorded before the password check so a parallel burst is counted.
+LOGIN_MAX_FAILURES = int(os.environ.get("LOGIN_MAX_FAILURES", "10"))
+LOGIN_WINDOW_SEC = 15 * 60
+_LOCKED_MSG = ("Too many sign-in attempts for this account. Try again in 15 minutes, "
+               "or reset your password to get in now.")
+_login_failures: "dict[str, deque]" = defaultdict(lambda: deque(maxlen=64))
+_login_fail_lock = threading.Lock()
+
+def _reserve_login_attempt(email: str) -> bool:
+    """Count this guess, then say whether it is still under the cap."""
+    now = time.time()
+    with _login_fail_lock:
+        q = _login_failures[email]
+        while q and now - q[0] > LOGIN_WINDOW_SEC:
+            q.popleft()
+        q.append(now)
+        return len(q) <= LOGIN_MAX_FAILURES
+
+def _clear_login_failures(email: str) -> None:
+    with _login_fail_lock:
+        _login_failures.pop(email, None)
+
+# Account creation. Per-IP, using the same client address as the other limiters.
+GUEST_PER_IP_HOURLY = int(os.environ.get("GUEST_PER_IP_HOURLY", "5"))
+SIGNUP_PER_IP_HOURLY = int(os.environ.get("SIGNUP_PER_IP_HOURLY", "10"))
+_ip_hourly: "dict[str, deque]" = defaultdict(lambda: deque(maxlen=64))
+_PER_IP_HOURLY = {"guest": GUEST_PER_IP_HOURLY, "signup": SIGNUP_PER_IP_HOURLY}
+
+def _ip_hourly_ok(kind: str, request: Request) -> bool:
+    key = f"{kind}:{_client_ip(request)}"
+    now = time.time()
+    q = _ip_hourly[key]
+    while q and now - q[0] > 3600:
+        q.popleft()
+    if len(q) >= _PER_IP_HOURLY[kind]:
+        return False
+    q.append(now)
+    return True
 
 def _check_rate_limit(key: str) -> bool:
     now = time.time()
@@ -427,9 +492,15 @@ async def _rate_limit_janitor() -> None:
             reset_stale = [k for k, q in _reset_rate.items() if not q or now - q[-1] > 3600]
             for k in reset_stale:
                 _reset_rate.pop(k, None)
-            if stale or reset_stale:
-                log.debug("rate_limit.cleanup removed=%d reset_removed=%d remaining=%d",
-                          len(stale), len(reset_stale), len(_chat_rate))
+            login_stale = [k for k, q in _login_failures.items() if not q or now - q[-1] > LOGIN_WINDOW_SEC]
+            for k in login_stale:
+                _login_failures.pop(k, None)
+            ip_stale = [k for k, q in _ip_hourly.items() if not q or now - q[-1] > 3600]
+            for k in ip_stale:
+                _ip_hourly.pop(k, None)
+            if stale or reset_stale or login_stale or ip_stale:
+                log.debug("rate_limit.cleanup removed=%d reset_removed=%d login_removed=%d ip_removed=%d remaining=%d",
+                          len(stale), len(reset_stale), len(login_stale), len(ip_stale), len(_chat_rate))
         except asyncio.CancelledError:
             break
         except Exception as ex:
@@ -522,29 +593,108 @@ def _reset_email_text(name: str, link: str, minutes: int) -> str:
             f"If you did not request this, you can ignore this email. Your password\n"
             f"stays as it is, and the link above will expire on its own.\n")
 
-def _make_token(user_id: str) -> str:
-    payload = f"{user_id}.{int(time.time()) + TOKEN_TTL}"
+def _make_token(user_id: str, version: int = 0) -> str:
+    """user_id.expiry.version.sig. version matches users.token_version.
+
+    Tokens minted before this field existed have no version component and are
+    treated as version 0, so existing sessions keep working until a password
+    change or logout bumps the counter.
+    """
+    payload = f"{user_id}.{int(time.time()) + TOKEN_TTL}.{int(version)}"
     sig = hmac.new(AUTH_SECRET.encode(), payload.encode(), hashlib.sha256).hexdigest()
     return base64.urlsafe_b64encode(f"{payload}.{sig}".encode()).decode().rstrip("=")
 
-def _verify_token(token: str) -> Optional[str]:
+def _parse_token(token: str) -> Optional[tuple]:
+    """Return (user_id, expiry_unix, version) or None."""
     try:
         raw = base64.urlsafe_b64decode(token + "=" * (-len(token) % 4)).decode()
-        user_id, expiry, sig = raw.rsplit(".", 2)
-        payload = f"{user_id}.{expiry}"
+        parts = raw.split(".")
+        if len(parts) == 3:
+            user_id, expiry, sig = parts
+            version = 0
+            payload = f"{user_id}.{expiry}"
+        elif len(parts) == 4:
+            user_id, expiry, ver, sig = parts
+            version = int(ver)
+            payload = f"{user_id}.{expiry}.{ver}"
+        else:
+            return None
         expected = hmac.new(AUTH_SECRET.encode(), payload.encode(), hashlib.sha256).hexdigest()
-        if not hmac.compare_digest(sig, expected): return None
-        if int(expiry) < int(time.time()): return None
-        return user_id
+        if not hmac.compare_digest(sig, expected):
+            return None
+        expiry_i = int(expiry)
+        if expiry_i < int(time.time()):
+            return None
+        return user_id, expiry_i, version
     except Exception:
         return None
+
+def _verify_token(token: str) -> Optional[str]:
+    parsed = _parse_token(token)
+    return parsed[0] if parsed else None
+
+def _token_version(user: Optional[dict]) -> int:
+    try:
+        return int((user or {}).get("token_version") or 0)
+    except (TypeError, ValueError):
+        return 0
+
+# Process-local copy of token_version so a logout/reset rejects the old token
+# even when the 30s user cache still holds the previous document.
+_token_epoch: "dict[str, int]" = {}
+
+def _remember_token_epoch(uid: str, version: int) -> None:
+    _token_epoch[uid] = int(version)
+
+def _password_changed_ts(user: Optional[dict]) -> Optional[int]:
+    changed = (user or {}).get("password_changed_at")
+    if not changed:
+        return None
+    try:
+        return int(datetime.fromisoformat(str(changed).replace("Z", "")).replace(
+            tzinfo=timezone.utc).timestamp())
+    except Exception:
+        return None
+
+def _token_revoked(user: Optional[dict], token: str) -> bool:
+    """Reject tokens issued before a password change or a logout.
+
+    password_changed_at used to be stored and never checked, so a stolen
+    token kept working for its full week after a reset. Logout only dropped
+    the cookie client-side. Both now bump users.token_version, and a token
+    whose version doesn't match — or that was minted before
+    password_changed_at — is rejected.
+    """
+    parsed = _parse_token(token)
+    if not parsed or not user:
+        return True
+    uid, expiry, version = parsed
+    if uid != user.get("user_id"):
+        return True
+    known = _token_epoch.get(uid)
+    if known is not None and version != known:
+        return True
+    if version != _token_version(user):
+        return True
+    changed_ts = _password_changed_ts(user)
+    if changed_ts is None:
+        return False
+    # Whole seconds: the token the reset endpoint itself returns is minted in
+    # the same second as password_changed_at and must stay valid.
+    return (expiry - TOKEN_TTL) < changed_ts
 
 def _user_from_auth(authorization: Optional[str]) -> Optional[dict]:
     if not authorization or not authorization.lower().startswith("bearer "):
         return None
-    uid = _verify_token(authorization.split(" ", 1)[1].strip())
-    if not uid: return None
-    return users_col.find_one({"user_id": uid}, {"_id": 0, "password_hash": 0})
+    token = authorization.split(" ", 1)[1].strip()
+    parsed = _parse_token(token)
+    if not parsed:
+        return None
+    uid = parsed[0]
+    user = users_col.find_one({"user_id": uid}, {"_id": 0, "password_hash": 0})
+    if not user or _token_revoked(user, token):
+        return None
+    return user
 
 _PAID_PLANS = {"pro", "premium", "team", "enterprise"}
 
@@ -3636,7 +3786,7 @@ def send_reply(email_id: str, reply_text: str) -> str:
     """Reply to an email. Content will be evaluated for professionalism."""
     e = emails_col.find_one({"id": email_id, "simulation_id": sim_id()})
     if not e: return "Not found."
-    emails_col.update_one({"id": email_id}, {"$set": {"replied": True, "reply_text": reply_text}})
+    emails_col.update_one({"id": email_id, "simulation_id": sim_id()}, {"$set": {"replied": True, "reply_text": reply_text}})
     sessions_col.update_one({"session_id": session_id()}, {"$addToSet": {"emails_replied": email_id}})
     return f"Reply sent to {e['from_name']}."
 
@@ -3656,6 +3806,49 @@ def get_tasks() -> str:
         lines.append(line)
     return "\n".join(lines)
 
+def _mark_task_done(task_id: str):
+    """Shared by the REST endpoint, the agent tool, and workflow auto-complete.
+
+    Returns (outcome, task, credit). outcome is "done", "already", or "not_found".
+    The completion credit is paid once per task, on the first transition into
+    done. Clicking complete again, or resubmitting after the manager sends the
+    task back, does not pay it again.
+    """
+    transitioned = tasks_col.update_one(
+        {"id": task_id, "simulation_id": sim_id(), "status": {"$ne": "done"},
+         "review_status": {"$nin": ["approved", "pending_review", "reviewing"]}},
+        {"$set": {"status": "done", "review_status": "pending_review",
+                  "completed_at": datetime.utcnow().isoformat()}},
+    )
+    t = tasks_col.find_one({"id": task_id, "simulation_id": sim_id()}, {"_id": 0})
+    if not t:
+        return "not_found", None, 0
+    if transitioned.modified_count == 0:
+        return "already", t, 0
+    credit = 0
+    first = tasks_col.update_one(
+        {"id": task_id, "simulation_id": sim_id(), "completion_credited": {"$ne": True}},
+        {"$set": {"completion_credited": True}},
+    )
+    if first.modified_count:
+        credit = _apply_level_weight(max(2, int((t.get("points") or 0) * 0.2)), "task")
+        tasks_col.update_one(
+            {"id": task_id, "simulation_id": sim_id()},
+            {"$set": {"awarded_points": credit}},
+        )
+        sessions_col.update_one(
+            {"session_id": session_id()},
+            {"$addToSet": {"tasks_completed": task_id}, "$inc": {"score_adj": credit}},
+        )
+    else:
+        sessions_col.update_one(
+            {"session_id": session_id()},
+            {"$addToSet": {"tasks_completed": task_id}},
+        )
+    t = tasks_col.find_one({"id": task_id, "simulation_id": sim_id()}, {"_id": 0}) or t
+    emit("task_completed", {"task": t})
+    return "done", t, credit
+
 @tool
 def complete_task(task_id: str) -> str:
     """Mark task as done. Awards a SMALL completion credit (20% of task points). The remaining 80% is held until the manager reviews the actual work via manager_review_task and is happy with quality."""
@@ -3665,15 +3858,11 @@ def complete_task(task_id: str) -> str:
     blocked = _task_complete_block(t)
     if blocked:
         return f"Blocked: {blocked[1]}"
-    r = tasks_col.update_one({"id": task_id, "simulation_id": sim_id(), "review_status": {"$ne": "approved"}}, {"$set": {"status": "done", "review_status": "pending_review", "completed_at": datetime.utcnow().isoformat()}})
-    if r.modified_count == 0: return "Not found or already reviewed."
-    t = tasks_col.find_one({"id": task_id}, {"_id": 0})
-    completion_credit = max(2, int(t["points"] * 0.2))
-    completion_credit = _apply_level_weight(completion_credit, "task")
-    tasks_col.update_one({"id": task_id, "simulation_id": sim_id()}, {"$set": {"awarded_points": completion_credit}})
-    sessions_col.update_one({"session_id": session_id()}, {"$addToSet": {"tasks_completed": task_id}, "$inc": {"score_adj": completion_credit}})
-    emit("task_completed", {"task": t})
-    return f"✅ {t['title']} marked done (+{completion_credit}pts completion credit). Manager will review your work — most points come from their review."
+    outcome, t, completion_credit = _mark_task_done(task_id)
+    if outcome != "done" or not t:
+        return "Not found or already completed — it's waiting for the manager's review."
+    note = f" (+{completion_credit}pts completion credit)" if completion_credit else " (resubmitted for review)"
+    return f"✅ {t['title']} marked done{note}. Manager will review your work — most points come from their review."
 
 @tool
 def manager_review_task(task_id: str, verdict: str, feedback: str) -> str:
@@ -4654,9 +4843,11 @@ Use get_tool_data with: {'sage_bank, sage_ledger, sage_invoices' if career=='acc
 
 NEVER do their work. Create pressure. Be realistic. Start as {cfg['manager']['name']} welcoming them — tell them to check Outlook."""
 
-# Pinned dated Fireworks ids: unversioned deepseek-v4-pro hangs; llama-v3p3-70b-instruct is gone.
+# Pinned dated Fireworks id. deepseek-v4-pro-0813 was retired from serverless
+# (25 Sep 2026) and every AI call 404'd. deepseek-v4p1-flash-1017 is the
+# current Fireworks serverless DeepSeek model (docs.fireworks.ai, Oct 2026).
 FIREWORKS_MODEL = os.environ.get(
-    "FIREWORKS_MODEL", "accounts/fireworks/models/deepseek-v4-pro-0813"
+    "FIREWORKS_MODEL", "accounts/fireworks/models/deepseek-v4p1-flash-1017"
 )
 FIREWORKS_OBSERVER_MODEL = os.environ.get(
     "FIREWORKS_OBSERVER_MODEL", "accounts/fireworks/models/glm-5p3-flash"
@@ -5478,16 +5669,20 @@ async def auth_and_scope(request: Request, call_next):
         return await call_next(request)
     # Verify token first — token decode is cheap (HMAC). Only hit Mongo if uncached.
     auth_hdr = request.headers.get("authorization") or ""
-    _uid = None
-    if auth_hdr.lower().startswith("bearer "):
-        _uid = _verify_token(auth_hdr.split(" ", 1)[1].strip())
-    if not _uid:
+    token = auth_hdr.split(" ", 1)[1].strip() if auth_hdr.lower().startswith("bearer ") else ""
+    parsed = _parse_token(token) if token else None
+    if not parsed:
         return _err("unauthorized", "Sign in to continue.", status=401)
+    _uid, _expiry, _ver = parsed
+    # A logout or password reset bumps the epoch immediately, before the
+    # cached user document would have noticed.
+    if _token_epoch.get(_uid) not in (None, _ver):
+        return _err("unauthorized", "Your session ended. Sign in again.", status=401)
     # TTL cache eliminates 2 blocking Mongo round-trips per request for the
     # same user inside the TTL window.
     _now = time.time()
     _cached = _user_cache.get(_uid)
-    if _cached and (_now - _cached[0]) < _USER_CACHE_TTL:
+    if _cached and (_now - _cached[0]) < _USER_CACHE_TTL and _token_version(_cached[1]) == _ver:
         user, prog = _cached[1], _cached[2]
     else:
         user = users_col.find_one({"user_id": _uid}, {"_id": 0, "password_hash": 0})
@@ -5495,6 +5690,9 @@ async def auth_and_scope(request: Request, call_next):
             return _err("unauthorized", "Sign in to continue.", status=401)
         prog = progress_col.find_one({"user_id": _uid}) or {}
         _user_cache[_uid] = (_now, user, prog)
+    if _token_revoked(user, token):
+        _invalidate_user_cache(_uid)
+        return _err("unauthorized", "Your session ended. Sign in again.", status=401)
     # Per-request scope: contextvars are isolated to this request's task.
     set_scope(_uid)
     saved_career = prog.get("current_career")
@@ -5515,8 +5713,10 @@ async def auth_and_scope(request: Request, call_next):
 # ── AUTH ENDPOINTS ────────────────────────────────────
 @app.post("/api/auth/signup", response_model=TokenOut, responses={409: {"model": ErrorEnvelope}})
 @app.post("/api/auth/register", response_model=TokenOut, responses={409: {"model": ErrorEnvelope}})
-async def auth_signup(req: SignupReq) -> TokenOut:
+async def auth_signup(req: SignupReq, request: Request) -> TokenOut:
     _ensure_bootstrap()
+    if not _ip_hourly_ok("signup", request):
+        raise HTTPException(429, "Too many sign-ups from your network. Please try again later.")
     email = req.email.strip().lower()
     if not EMAIL_RE.match(email):
         raise HTTPException(400, "Please enter a valid email address.")
@@ -5548,20 +5748,35 @@ async def auth_signup(req: SignupReq) -> TokenOut:
     return TokenOut(token=_make_token(user_id), user=_public_user(u),
                     progress={"current_career": None, "current_day": 0})
 
+_DUMMY_PW_HASH: Optional[str] = None
+
+def _dummy_pw_hash() -> str:
+    """A real PBKDF2 digest so an unknown email costs the same as a wrong password."""
+    global _DUMMY_PW_HASH
+    if not _DUMMY_PW_HASH:
+        _DUMMY_PW_HASH = _hash_pw(secrets.token_hex(16))
+    return _DUMMY_PW_HASH
+
 @app.post("/api/auth/signin", response_model=TokenOut, responses={401: {"model": ErrorEnvelope}})
 @app.post("/api/auth/login", response_model=TokenOut, responses={401: {"model": ErrorEnvelope}})
 async def auth_login(req: LoginReq) -> TokenOut:
     _ensure_bootstrap()
     email = req.email.strip().lower()
+    if not _reserve_login_attempt(email):
+        log.info("auth.login_locked")
+        raise HTTPException(429, _LOCKED_MSG)
     u = users_col.find_one({"email": email})
-    if not u or not _verify_pw(req.password, u.get("password_hash", "")):
-        # Constant-time-ish: same message for both branches, so we don't leak which side failed.
+    stored = (u or {}).get("password_hash") or _dummy_pw_hash()
+    ok = await asyncio.to_thread(_verify_pw, req.password, stored)
+    if not u or not ok:
+        # Same message for both branches, so we don't leak which side failed.
         raise HTTPException(401, "Invalid email or password.")
+    _clear_login_failures(email)
     prog = progress_col.find_one({"user_id": u["user_id"]}, {"_id": 0}) or {}
     log.info("auth.login user=%s", u["user_id"])
     try: analytics_col.insert_one({"event": "user_logged_in", "user_id": u["user_id"], "data": {}, "ts": datetime.utcnow().isoformat()})
     except Exception: pass
-    return {"token": _make_token(u["user_id"]), "user": _public_user(u),
+    return {"token": _make_token(u["user_id"], _token_version(u)), "user": _public_user(u),
             "progress": {"current_career": prog.get("current_career"), "current_day": prog.get("current_day", 0)}}
 
 @app.get("/api/auth/me")
@@ -5575,15 +5790,34 @@ async def auth_me(authorization: Optional[str] = Header(None)):
                          "cumulative_score": prog.get("cumulative_score", 0)}}
 
 @app.post("/api/auth/logout")
-async def auth_logout():
-    # Stateless tokens — client just discards. Endpoint exists for symmetry.
+async def auth_logout(authorization: Optional[str] = Header(None)):
+    """Invalidate every token issued so far for this account.
+
+    The cookie/header is discarded by the client, and the server rejects it
+    too: token_version moves forward, so a copied bearer token stops working.
+    """
+    user = _user_from_auth(authorization)
+    if user:
+        uid = user["user_id"]
+        updated = users_col.find_one_and_update(
+            {"user_id": uid},
+            {"$inc": {"token_version": 1}},
+            projection={"token_version": 1},
+            return_document=ReturnDocument.AFTER,
+        )
+        if updated:
+            _remember_token_epoch(uid, int(updated.get("token_version") or 0))
+        _invalidate_user_cache(uid)
+        log.info("auth.logout user=%s", uid)
     return {"ok": True}
 
 @app.post("/api/auth/guest", response_model=TokenOut)
-async def auth_guest() -> TokenOut:
+async def auth_guest(request: Request) -> TokenOut:
     """Throwaway guest session. Progress is real but flagged is_guest=True so the
     frontend can show a 'Register to save' banner. Tokens still expire in 7 days."""
     _ensure_bootstrap()
+    if not _ip_hourly_ok("guest", request):
+        raise HTTPException(429, "Too many guest sessions from your network. Create a free account to continue.")
     user_id = "g_" + secrets.token_hex(8)
     now = datetime.utcnow().isoformat()
     u = {
@@ -5736,13 +5970,22 @@ async def auth_reset_password(req: ResetPasswordReq) -> TokenOut:
     if not _can_request_reset(user):
         raise HTTPException(400, "That reset link is no longer valid.")
 
-    users_col.update_one({"user_id": uid}, {"$set": {
-        "password_hash": _hash_pw(req.password),
-        "password_changed_at": datetime.utcnow().isoformat(),
-    }})
+    changed_at = datetime.utcnow().isoformat()
+    updated = users_col.find_one_and_update(
+        {"user_id": uid},
+        {"$set": {
+            "password_hash": _hash_pw(req.password),
+            "password_changed_at": changed_at,
+        }, "$inc": {"token_version": 1}},
+        projection={"token_version": 1},
+        return_document=ReturnDocument.AFTER,
+    )
+    new_version = int((updated or {}).get("token_version") or 0)
+    _remember_token_epoch(uid, new_version)
     password_resets_col.delete_many({"user_id": uid})
     _invalidate_user_cache(uid)
     _reset_rate.pop(f"email:{doc.get('email', '')}", None)
+    _clear_login_failures((doc.get("email") or "").strip().lower())
 
     prog = progress_col.find_one({"user_id": uid}, {"_id": 0}) or {}
     log.info("auth.password_reset user=%s", uid)
@@ -5751,18 +5994,25 @@ async def auth_reset_password(req: ResetPasswordReq) -> TokenOut:
                                   "data": {}, "ts": datetime.utcnow().isoformat()})
     except Exception:
         pass
-    return TokenOut(token=_make_token(uid), user=_public_user(user),
+    # The fresh token carries the new version, so this response stays logged in
+    # while every token issued before the reset is rejected.
+    user = {**user, "password_changed_at": changed_at, "token_version": new_version}
+    return TokenOut(token=_make_token(uid, new_version), user=_public_user(user),
                     progress={"current_career": prog.get("current_career"),
                               "current_day": prog.get("current_day", 0)})
 
 # Collections that hold per-user data. Used by /api/profile/history and DELETE /api/auth/account.
 _USER_DATA_COLS_BY_USER_ID = ("progress_col", "interviews_col", "user_scenarios_col",
-                              "password_resets_col")
+                              "password_resets_col", "analytics_col",
+                              # These are stamped with both simulation_id and user_id.
+                              "hr_onboarding_col", "training_col", "it_setup_col",
+                              "files_col", "grc_col")
 _USER_DATA_COLS_BY_SIM_ID = (
     "emails_col", "tasks_col", "sheets_col", "invoices_col", "evals_col",
     "memory_col", "actions_col", "agent_comms_col",
     "system_events_col", "siem_col", "jira_col", "campaigns_col",
     "reputation_col", "slack_col", "tools_col",
+    "hr_onboarding_col", "training_col", "it_setup_col", "files_col", "grc_col",
 )
 # sessions_col stores its sim handle under the field `sim_id`, not `simulation_id`,
 # and its primary key is session_id. Deleted separately by session_id.
@@ -5881,17 +6131,17 @@ async def auth_delete_account(authorization: Optional[str] = Header(None)):
         col = globals().get(name)
         if col is None: continue
         r = col.delete_many({"simulation_id": _sim_id})
-        deleted[name] = r.deleted_count
+        deleted[name] = deleted.get(name, 0) + r.deleted_count
     for name in _USER_DATA_COLS_BY_USER_ID:
         col = globals().get(name)
         if col is None: continue
         r = col.delete_many({"user_id": uid})
-        deleted[name] = r.deleted_count
+        deleted[name] = deleted.get(name, 0) + r.deleted_count
     for name in _USER_DATA_COLS_BY_SESSION_ID:
         col = globals().get(name)
         if col is None: continue
         r = col.delete_many({"session_id": _sess_id})
-        deleted[name] = r.deleted_count
+        deleted[name] = deleted.get(name, 0) + r.deleted_count
     # Per-process caches keyed by user_id.
     _user_orchestrators.pop(uid, None)
     _user_chat_history.pop(uid, None)
@@ -6059,13 +6309,13 @@ async def chat(req: ChatReq, request: Request, background: BackgroundTasks):
     events = list(system_events_col.find({"simulation_id": sm}))
     for ev in events:
         if not ev.get("triggered") and ic >= ev.get("trigger_at", 999):
-            system_events_col.update_one({"id": ev["id"]}, {"$set": {"triggered": True}})
+            system_events_col.update_one({"id": ev["id"], "simulation_id": sm}, {"$set": {"triggered": True}})
             cfg = CAREER_CONFIGS[career]
             eid = f"e_{uuid.uuid4().hex[:6]}"
             emails_col.insert_one({"id": eid, "simulation_id": sm, "from_name": cfg["it"]["name"], "from_role": cfg["it"]["role"], "from_email": cfg["it"]["email"], "to": "all", "subject": f"⚠️ {ev['start_msg']}", "body": ev["start_msg"], "time": datetime.utcnow().strftime("%H:%M"), "read": False, "replied": False, "priority": "high", "category": "system", "requires_action": False})
             sessions_col.update_one({"session_id": sid}, {"$set": {"it_outage_active": True}})
         if ev.get("triggered") and not ev.get("resolved") and ev.get("end_at") and ic >= ev["end_at"]:
-            system_events_col.update_one({"id": ev["id"]}, {"$set": {"resolved": True}})
+            system_events_col.update_one({"id": ev["id"], "simulation_id": sm}, {"$set": {"resolved": True}})
             cfg = CAREER_CONFIGS[career]
             eid = f"e_{uuid.uuid4().hex[:6]}"
             emails_col.insert_one({"id": eid, "simulation_id": sm, "from_name": cfg["it"]["name"], "from_role": cfg["it"]["role"], "from_email": cfg["it"]["email"], "to": "all", "subject": f"✅ {ev['end_msg']}", "body": ev["end_msg"], "time": datetime.utcnow().strftime("%H:%M"), "read": False, "replied": False, "priority": "low", "category": "system", "requires_action": False})
@@ -6081,13 +6331,16 @@ async def chat(req: ChatReq, request: Request, background: BackgroundTasks):
             # event loop stays free for other requests during the agent run.
             result = await asyncio.to_thread(orc.invoke, {"messages": messages_in}, config=_ls_config("orchestrator"))
         except Exception as ex:
-            log.exception("chat.invoke_crashed kind=%s", type(ex).__name__)
+            log.exception("chat.invoke_crashed kind=%s err=%s", type(ex).__name__, str(ex)[:300])
             kind = type(ex).__name__
             msg = str(ex).lower()
             # Upstream LLM quota / rate limit — give the user a clear, actionable message
             # without leaking the provider's raw JSON envelope.
             if kind == "RateLimitError" or "rate_limit_exceeded" in msg or "rate limit" in msg or "quota" in msg:
                 return {"response": "The AI service is temporarily rate-limited. Please wait a moment and try again.", "error": "upstream_rate_limited"}
+            if ("model" in msg and any(s in msg for s in ("not found", "does not exist", "unknown", "retired", "404"))) or "model_not_found" in msg:
+                return {"response": "The AI model configured for this workspace is unavailable. An admin needs to set FIREWORKS_MODEL to a current Fireworks model.",
+                        "error": "model_unavailable"}
             # Anything else → generic message, real details only in logs.
             return {"response": "Something went wrong reaching the AI service. Please try again in a moment.", "error": "orchestrator_failed"}
         msgs = result.get("messages") or []
@@ -6285,24 +6538,22 @@ async def api_complete_task(task_id: str, background: BackgroundTasks):
     blocked = _task_complete_block(t)
     if blocked:
         return _err(blocked[0], blocked[1], status=400)
-    r = tasks_col.update_one(
-        {"id": task_id, "simulation_id": sim_id(), "review_status": {"$ne": "approved"}},
-        {"$set": {"status": "done", "review_status": "pending_review", "completed_at": datetime.utcnow().isoformat()}},
-    )
-    if r.modified_count == 0:
-        return {"error": "not_found_or_already_approved"}
-    t = tasks_col.find_one({"id": task_id}, {"_id": 0})
-    completion_credit = max(2, int(t["points"] * 0.2))
-    tasks_col.update_one({"id": task_id, "simulation_id": sim_id()}, {"$set": {"awarded_points": completion_credit}})
-    sessions_col.update_one(
-        {"session_id": session_id()},
-        {"$addToSet": {"tasks_completed": task_id}, "$inc": {"score_adj": completion_credit}},
-    )
-    emit("task_completed", {"task": t})
+    outcome, t, completion_credit = _mark_task_done(task_id)
+    if outcome == "not_found" or not t:
+        return _err("not_found", "Task not found.", status=404)
+    if outcome != "done":
+        if t.get("review_status") == "approved":
+            return {"error": "not_found_or_already_approved"}
+        return {"ok": True, "task": t, "completion_credit": 0, "awaiting_review": True,
+                "message": "Already submitted — waiting for the manager's review."}
     _touch_activity()
     _queue_manager_review(background, user_id() or "")
+    if completion_credit:
+        message = f"+{completion_credit}pts completion credit. Manager will review your work for the rest."
+    else:
+        message = "Resubmitted for review. The completion credit was already awarded."
     return {"ok": True, "task": t, "completion_credit": completion_credit, "awaiting_review": True,
-            "message": f"+{completion_credit}pts completion credit. Manager will review your work for the rest."}
+            "message": message}
 
 @app.get("/api/hr/onboarding")
 async def api_hr_onboarding_get():
@@ -6484,18 +6735,52 @@ async def api_attachment_view(att_id: str):
 async def api_sheet():
     return sheets_col.find_one({"simulation_id": sim_id()}, {"_id": 0}) or {}
 
+# Ground truth that must not reach the browser. Scoring still reads the
+# stored documents. Same idea as _grc_public_control.
+_SIEM_ANSWER_KEYS = (
+    "is_real_threat", "correct_action", "correct_actions", "playbook_steps",
+    "threat_type", "false_positive_indicators", "false_positive_reason", "level_trap",
+)
+
+def _siem_public(doc: dict) -> dict:
+    return {k: v for k, v in doc.items() if k not in _SIEM_ANSWER_KEYS and k != "_id"}
+
+def _invoice_public(doc: dict) -> dict:
+    """Drop the answer key and any note that states the correction.
+
+    A queried invoice whose correct_amount differs from the billed amount
+    carries a note like '£600 VAT applied in error'. Operational notes
+    (chase the client, 32 days overdue) stay.
+    """
+    out = {k: v for k, v in doc.items() if k not in ("correct_amount", "_id")}
+    correct = doc.get("correct_amount")
+    amount = doc.get("amount")
+    try:
+        reveals = correct is not None and amount is not None and float(correct) != float(amount)
+    except (TypeError, ValueError):
+        reveals = correct is not None and correct != amount
+    if reveals:
+        out.pop("notes", None)
+        out.pop("vat_applied", None)
+    return out
+
 @app.get("/api/invoices")
 async def api_invoices():
     _day = _current_day()
-    return {"invoices": list(invoices_col.find({"simulation_id": sim_id(), "$or": [{"day": {"$lte": _day}}, {"day": {"$exists": False}}]}, {"_id": 0}).sort("date", 1))}
+    rows = invoices_col.find(
+        {"simulation_id": sim_id(), "$or": [{"day": {"$lte": _day}}, {"day": {"$exists": False}}]},
+        {"_id": 0},
+    ).sort("date", 1)
+    return {"invoices": [_invoice_public(d) for d in rows]}
 
 @app.get("/api/siem")
 async def api_siem():
     # Newest-first, like a real SIEM queue default — and it interleaves the
     # authored signal into the generated noise instead of block-ordering them.
-    return {"alerts": list(siem_col.find(
+    rows = siem_col.find(
         {"simulation_id": sim_id(), "day": {"$lte": _current_day()}}, {"_id": 0}
-    ).sort([("day", -1), ("timestamp", -1)]))}
+    ).sort([("day", -1), ("timestamp", -1)])
+    return {"alerts": [_siem_public(d) for d in rows]}
 
 _DAY_PACK_COLS = {
     "emails": emails_col,
@@ -8723,30 +9008,127 @@ def _strip_html_to_text(html: str) -> str:
     h = re.sub(r"\n{3,}", "\n\n", h)
     return h.strip()
 
-def _fetch_jd_from_url(url: str) -> tuple[str, str]:
-    """Best-effort JD fetch. Returns (title, text) or raises HTTPException."""
-    try:
-        from urllib.parse import urlparse
-        host = (urlparse(url).hostname or "").lower()
-    except Exception:
-        raise HTTPException(400, "Invalid URL.")
+_JD_FETCH_MAX_REDIRECTS = 3
+_JD_FETCH_MAX_BYTES = 2_000_000
+_JD_FETCH_FAIL = "Couldn't fetch that page. LinkedIn and many job boards block bots — paste the description text instead."
+_JD_AI_DOWN_MSG = ("Our AI is temporarily unavailable, so we couldn't build your simulation. "
+                   "This is a problem on our side, not with your job description. Please try again shortly.")
+# IPv6 ranges that can still route to internal IPv4: NAT64, IPv4-compatible, 6to4.
+_JD_EXTRA_BLOCKED_NETS = ("64:ff9b::/96", "64:ff9b:1::/48", "::/96", "2002::/16")
+
+def _jd_host_allowed(host: str) -> bool:
+    host = (host or "").lower().rstrip(".").strip("[]")
     if not host:
-        raise HTTPException(400, "Invalid URL.")
-    # Soft allow-list — refuse obvious internal/private hosts.
-    if host in ("localhost", "127.0.0.1") or host.endswith(".local"):
+        return False
+    for allowed in _JD_URL_ALLOWED_HOSTS:
+        if host == allowed or host.endswith("." + allowed):
+            return True
+    return False
+
+def _ip_is_public(ip_text: str) -> bool:
+    """False for private, loopback, link-local, multicast, and mapped equivalents."""
+    import ipaddress
+    try:
+        ip = ipaddress.ip_address(str(ip_text).split("%", 1)[0])
+    except ValueError:
+        return False
+    mapped = getattr(ip, "ipv4_mapped", None)
+    if mapped is not None:
+        ip = mapped
+    if (not ip.is_global or ip.is_multicast or ip.is_private or ip.is_loopback
+            or ip.is_link_local or ip.is_unspecified or ip.is_reserved):
+        return False
+    if ip.version == 6:
+        if any(ip in ipaddress.ip_network(n) for n in _JD_EXTRA_BLOCKED_NETS):
+            return False
+    return True
+
+def _resolve_public_or_raise(url: "_httpx.URL") -> str:
+    """One public IP for this hop, or raise. The caller connects to that IP.
+
+    http(s) only. The allowlist is applied to this hop's host, so a redirect
+    off the job-board list never gets fetched. Every DNS answer is checked:
+    one private address rejects the host.
+    """
+    import socket
+    if url.scheme not in ("http", "https"):
+        raise HTTPException(400, "Invalid URL. Use a normal http(s) link.")
+    port = url.port or (443 if url.scheme == "https" else 80)
+    if port not in (80, 443):
         raise HTTPException(400, "URL host not allowed.")
+    host = (url.host or "").lower().rstrip(".")
+    if not host or not _jd_host_allowed(host) or host == "localhost" or host.endswith((".local", ".localhost", ".internal")):
+        raise HTTPException(400, "URL host not allowed.")
+    try:
+        dns_name = host.encode("idna").decode("ascii")
+        infos = socket.getaddrinfo(dns_name, port, type=socket.SOCK_STREAM)
+    except Exception:
+        raise HTTPException(422, _JD_FETCH_FAIL)
+    if not infos:
+        raise HTTPException(422, _JD_FETCH_FAIL)
+    chosen = None
+    for info in infos:
+        ip = info[4][0]
+        if not _ip_is_public(ip):
+            log.warning("jd_fetch.blocked host=%s ip=%s", host[:80], ip)
+            raise HTTPException(400, "URL host not allowed.")
+        chosen = chosen or ip.split("%", 1)[0]
+    return chosen
+
+def _fetch_jd_from_url(url: str) -> tuple[str, str]:
+    """Best-effort JD fetch. Returns (title, text) or raises HTTPException.
+
+    Redirects are not followed by the client. Each hop, including the final
+    host, is allowlisted and resolved, and the connection goes to the IP that
+    was checked so DNS can't change between the check and the request.
+    """
     headers = {
         "User-Agent": "Mozilla/5.0 (compatible; FirstDeskBot/0.1; +https://firstdesk.app)",
         "Accept": "text/html,application/xhtml+xml",
     }
     try:
-        r = _httpx.get(url, headers=headers, timeout=8.0, follow_redirects=True)
-        if r.status_code >= 400:
-            raise HTTPException(422, f"Couldn't fetch the page (HTTP {r.status_code}). LinkedIn often blocks bots — paste the description text instead.")
-        html = r.text
-    except _httpx.HTTPError as ex:
-        log.warning("jd_fetch.failed url=%s kind=%s", url[:120], type(ex).__name__)
-        raise HTTPException(422, "Couldn't reach that page. Paste the description text instead.")
+        current = _httpx.URL(url)
+    except Exception:
+        raise HTTPException(400, "Invalid URL.")
+    if not current.scheme or not current.host:
+        raise HTTPException(400, "Invalid URL.")
+    html = ""
+    try:
+        with _httpx.Client(follow_redirects=False, timeout=8.0) as client:
+            for _hop in range(_JD_FETCH_MAX_REDIRECTS + 1):
+                ip = _resolve_public_or_raise(current)
+                host_hdr = current.host.encode("idna").decode("ascii")
+                if current.port:
+                    host_hdr = f"{host_hdr}:{current.port}"
+                pinned = current.copy_with(host=ip)
+                ext = {"sni_hostname": host_hdr.split(":", 1)[0]} if current.scheme == "https" else None
+                with client.stream("GET", pinned, headers={**headers, "Host": host_hdr}, extensions=ext) as r:
+                    if r.is_redirect:
+                        loc = r.headers.get("location")
+                        if not loc:
+                            raise HTTPException(422, _JD_FETCH_FAIL)
+                        try:
+                            current = current.join(loc)
+                        except Exception:
+                            raise HTTPException(400, "Invalid URL.")
+                        continue
+                    if r.status_code >= 400:
+                        log.info("jd_fetch.http_error status=%s", r.status_code)
+                        raise HTTPException(422, _JD_FETCH_FAIL)
+                    body = bytearray()
+                    for chunk in r.iter_bytes():
+                        body.extend(chunk)
+                        if len(body) > _JD_FETCH_MAX_BYTES:
+                            break
+                    html = bytes(body).decode(r.encoding or "utf-8", errors="replace")
+                    break
+            else:
+                raise HTTPException(422, _JD_FETCH_FAIL)
+    except HTTPException:
+        raise
+    except (_httpx.HTTPError, _httpx.InvalidURL, UnicodeError, ValueError) as ex:
+        log.warning("jd_fetch.failed kind=%s", type(ex).__name__)
+        raise HTTPException(422, _JD_FETCH_FAIL)
     title_m = re.search(r"(?is)<title[^>]*>(.*?)</title>", html)
     title = _strip_html_to_text(title_m.group(1)) if title_m else "Pasted Job"
     text = _strip_html_to_text(html)
@@ -8769,21 +9151,32 @@ _CAREER_CLASSIFIER_PROMPT = (
 )
 _VALID_CAREERS = {"accountant", "cybersecurity", "marketing", "developer", "procurement", "hr", "pm", "grc"}
 
-def _classify_career_from_jd(jd_text: str, title: str = "") -> str:
-    """Pick the closest of the 8 careers for a free-form JD. Falls back to 'pm' on failure."""
+class CareerClassifierUnavailable(RuntimeError):
+    """The model call itself failed. Not a reason to silently pick 'pm'."""
+
+def _classify_career_from_jd(jd_text: str, title: str = "") -> Optional[str]:
+    """Pick the closest of the 8 careers for a free-form JD.
+
+    Returns None when the model answered but not with a known career, so the
+    caller can ask the user to choose. Raises CareerClassifierUnavailable when
+    the model call fails. It used to return 'pm' for both, which hid an outage
+    behind a scenario for the wrong job.
+    """
     snippet = (title + "\n\n" + (jd_text or ""))[:3000].strip()
     if not snippet:
-        return "pm"
+        return None
     try:
         resp = llm.invoke([("system", _CAREER_CLASSIFIER_PROMPT), ("human", snippet)], config=_ls_config("career_classifier"))
-        choice = (getattr(resp, "content", "") or "").strip().lower().split()[0] if resp else ""
-        choice = choice.strip(".,:;()\"'")
-        if choice in _VALID_CAREERS:
-            log.info("jd.career_classified=%s title=%r", choice, title[:60])
-            return choice
     except Exception as ex:
-        log.warning("jd.classify_failed kind=%s", type(ex).__name__)
-    return "pm"
+        log.error("jd.classify_failed kind=%s err=%s", type(ex).__name__, str(ex)[:300])
+        raise CareerClassifierUnavailable(type(ex).__name__) from ex
+    words = (getattr(resp, "content", "") or "").strip().lower().split() if resp else []
+    choice = words[0].strip(".,:;()\"'") if words else ""
+    if choice in _VALID_CAREERS:
+        log.info("jd.career_classified=%s title=%r", choice, title[:60])
+        return choice
+    log.warning("jd.classify_unparsed reply=%r", " ".join(words)[:80])
+    return None
 
 class JDIngestReq(BaseModel):
     career: str = Field("auto", pattern=r"^(auto|accountant|cybersecurity|marketing|developer|procurement|hr|pm|grc)$")
@@ -8818,10 +9211,18 @@ async def api_scenario_from_jd(req: JDIngestReq, request: Request):
             jd_title = req.title.strip()[:200]
     company = (req.company or "Custom Scenario Co").strip()[:120] or "Custom Scenario Co"
 
-    # Auto-classify career if the user picked "Auto-detect" (or any role outside our 7 fixed tracks)
+    # Auto-classify career if the user picked "Auto-detect"
     resolved_career = req.career
     if resolved_career == "auto":
-        resolved_career = _classify_career_from_jd(jd_text, jd_title)
+        try:
+            resolved_career = _classify_career_from_jd(jd_text, jd_title)
+        except CareerClassifierUnavailable:
+            _jd_rate.pop(uid, None)
+            raise HTTPException(503, _JD_AI_DOWN_MSG)
+        if not resolved_career:
+            _jd_rate.pop(uid, None)
+            raise HTTPException(422, "We couldn't tell which kind of role this is. "
+                                "Pick the closest career from the list and try again.")
 
     # Build a JobPosting and run it through the extractor + materializer directly.
     from scenario_engine import JobPosting as _JP
@@ -8841,6 +9242,9 @@ async def api_scenario_from_jd(req: JDIngestReq, request: Request):
     engine = get_scenario_engine()
     template = engine.extractor.extract(job)
     if template is None:
+        if getattr(engine.extractor, "last_failure", None) == "llm":
+            _jd_rate.pop(uid, None)
+            raise HTTPException(503, _JD_AI_DOWN_MSG)
         raise HTTPException(422, "Couldn't extract a workable scenario from that JD. Try a more detailed description.")
 
     # Persist for reuse + cache the JD
@@ -9433,22 +9837,12 @@ async def api_task_step(task_id: str, req: TaskStepReq, background: BackgroundTa
                                  "tool": target.get("tool"), "task": t,
                                  "note": req.note})
 
-    # If all steps are done, auto-complete the task with the standard credit path
+    # If all steps are done, auto-complete through the same pay-once path.
     fresh = tasks_col.find_one({"id": task_id, "simulation_id": sim_id()}, {"_id": 0})
     all_done = all(s.get("done") for s in (fresh.get("tool_workflow") or []))
-    if all_done and fresh.get("status") != "done":
-        completion_credit = max(2, int(fresh["points"] * 0.2))
-        tasks_col.update_one(
-            {"id": task_id, "simulation_id": sim_id()},
-            {"$set": {"status": "done", "review_status": "pending_review",
-                      "completed_at": datetime.utcnow().isoformat(),
-                      "awarded_points": completion_credit}},
-        )
-        sessions_col.update_one(
-            {"session_id": session_id()},
-            {"$addToSet": {"tasks_completed": task_id}, "$inc": {"score_adj": completion_credit}},
-        )
-        emit("task_completed", {"task": fresh})
+    if all_done and fresh.get("status") != "done" and fresh.get("review_status") != "approved":
+        _mark_task_done(task_id)
+        fresh = tasks_col.find_one({"id": task_id, "simulation_id": sim_id()}, {"_id": 0}) or fresh
         emit("task_workflow_completed", {"task": fresh})
         _post_slack_system(primary_ch, "FirstDesk Workflow",
                            f"[{task_id}] all {len(workflow)} steps complete — handed to manager for review.")
@@ -9787,6 +10181,11 @@ async def interview_voice_ws(ws: WebSocket):
     qp = ws.query_params
     token = (qp.get("token") or "").strip()
     user_id = _verify_token(token) if token else None
+    if user_id:
+        ws_user = users_col.find_one(
+            {"user_id": user_id}, {"token_version": 1, "password_changed_at": 1, "user_id": 1})
+        if not ws_user or _token_revoked(ws_user, token):
+            user_id = None
     if not user_id:
         await ws.close(code=1008)
         return
