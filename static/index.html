@@ -1714,7 +1714,7 @@ async function checkAuth(){
     return;
   }
   const t=localStorage.getItem(TKEY);
-  if(!t){showAuth();return}
+  if(!t){showAuth();const mode=new URLSearchParams(location.search).get('mode');if(mode==='signup'||mode==='forgot')setAuthMode(mode);return}
   try{
     const r=await _origFetch(A+'/api/auth/me',{headers:{'Authorization':'Bearer '+t}});
     if(!r.ok){localStorage.removeItem(TKEY);showAuth();return}

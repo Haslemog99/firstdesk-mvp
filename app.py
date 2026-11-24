@@ -24,7 +24,7 @@ from urllib.parse import quote
 from fastapi import BackgroundTasks, FastAPI, Header, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, BeforeValidator, Field, field_validator
 from pymongo import MongoClient
@@ -5230,7 +5230,7 @@ async def _security_headers(request: Request, call_next):
     # Cache-Control for static HTML/CSS/JS served from /static.
     p = request.url.path
     if "Cache-Control" not in response.headers:
-        if p.endswith(".html") or p == "/" or p == "/interview" or p == "/interview.html":
+        if p.endswith(".html") or p in ("/", "/landing", "/interview", "/interview.html"):
             response.headers["Cache-Control"] = "public, max-age=3600"
         elif p.endswith((".css", ".js", ".svg", ".png", ".jpg", ".jpeg", ".woff2", ".ico")):
             response.headers["Cache-Control"] = "public, max-age=86400"
@@ -9511,7 +9511,7 @@ def _task_to_slack(p: dict):
 async def no_cache_static(request: Request, call_next):
     resp = await call_next(request)
     p = request.url.path
-    if p == "/" or p.endswith(".html") or p.endswith(".js") or p.endswith(".css"):
+    if p in ("/", "/landing") or p.endswith(".html") or p.endswith(".js") or p.endswith(".css"):
         resp.headers["Cache-Control"] = "no-store, must-revalidate"
         resp.headers["Pragma"] = "no-cache"
     return resp
@@ -9855,6 +9855,32 @@ async def interview_voice_ws(ws: WebSocket):
         except Exception:
             pass
 
+
+# Marketing page for signed-out visitors. Auth lives in localStorage (`fdToken`),
+# so a normal browser navigation cannot prove a session. `/` serves the landing
+# page; the page itself sends people who already have a token to `/?app=1`.
+# Password-reset mail uses `/?reset=<token>` and must keep hitting the SPA.
+_STATIC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
+
+def _spa_html() -> FileResponse:
+    return FileResponse(os.path.join(_STATIC_DIR, "index.html"), media_type="text/html")
+
+def _landing_html(request: Request) -> HTMLResponse:
+    with open(os.path.join(_STATIC_DIR, "landing.html"), encoding="utf-8") as fh:
+        html = fh.read()
+    origin = _html_escape(str(request.base_url).rstrip("/"))
+    return HTMLResponse(html.replace("{{ORIGIN}}", origin))
+
+@app.api_route("/landing", methods=["GET", "HEAD"], include_in_schema=False)
+async def marketing_landing(request: Request):
+    return _landing_html(request)
+
+@app.api_route("/", methods=["GET", "HEAD"], include_in_schema=False)
+async def root_entry(request: Request):
+    q = request.query_params
+    if "reset" in q or "app" in q:
+        return _spa_html()
+    return _landing_html(request)
 
 app.mount("/", StaticFiles(directory="static", html=True), name="static")
 
